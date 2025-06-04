@@ -1,8 +1,5 @@
 # Typo Checker CLI
 
-[![npm version](https://img.shields.io/npm/v/typo-checker-cli.svg)](https://www.npmjs.com/package/typo-checker)
-[![License](https://img.shields.io/npm/l/typo-checker-cli.svg)](LICENSE)
-
 A powerful command-line tool and library to find typos in your JavaScript, TypeScript, JSX, and TSX source code files by analyzing string literals using AST parsing and spell-checking with [nspell](https://github.com/wooorm/nspell).
 
 ---
@@ -99,3 +96,8 @@ If no typos are found:
 
 ---
 
+## Contributing
+Feel free to open issues or PRs for new utility suggestions or improvements.
+
+## License
+MIT
