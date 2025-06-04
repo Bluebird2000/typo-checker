@@ -141,7 +141,10 @@ const extractWordsFromCode = (code: string): string[] => {
 
 const loadNspell = async (): Promise<nspell> => {
   const dict = await dictionaryEn;
-  return nspell(dict);
+  // Convert aff and dic from Uint8Array to Buffer
+  const aff = Buffer.from(dict.aff);
+  const dic = Buffer.from(dict.dic);
+  return nspell(aff, dic);
 };
 
 const isValidWord = (
