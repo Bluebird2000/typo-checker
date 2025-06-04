@@ -244,15 +244,15 @@ var displayTypos = (typos) => {
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(import_chalk.default.yellow("\u26A0\uFE0F Typos found:\n"));
+  console.log(import_chalk.default.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
-  console.log(import_chalk.default.redBright(`
+  console.log(import_chalk.default.redBright.bold(`
 \u274C Total typos: ${typos.length}
 `));
 };
 var displaySuccess = (fileCount) => {
   const table = new import_cli_table3.default({
-    head: [import_chalk.default.green("\u2705 Typo Check Passed")]
+    head: [import_chalk.default.greenBright.bold("\u2705 Typo Check Passed")]
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -267,7 +267,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
     ignore: ["node_modules"]
   });
   console.log(
-    import_chalk.default.blue(
+    import_chalk.default.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
 `
     )

@@ -1,5 +1,5 @@
 export const typoCheckerStrings = {
-  screenTitle: "Typo Checke Settings",
+  screenTitle: "Typo Checkerc Settings",
   appVersion: "Typo Checker Library v1.0.0",
   invite: "Invite Developers",
   docsDescription: "Upload your source code files to scan for typos",

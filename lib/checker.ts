@@ -277,14 +277,14 @@ const displayTypos = (typos: TypoEntry[]) => {
     table.push([file, line, word, suggestions.join(", ")])
   );
 
-  console.log(chalk.yellow("⚠️ Typos found:\n"));
+  console.log(chalk.yellowBright.bold("⚠️ Typos found:\n"));
   console.log(table.toString());
-  console.log(chalk.redBright(`\n❌ Total typos: ${typos.length}\n`));
+  console.log(chalk.redBright.bold(`\n❌ Total typos: ${typos.length}\n`));
 };
 
 const displaySuccess = (fileCount: number) => {
   const table = new Table({
-    head: [chalk.green("✅ Typo Check Passed")],
+    head: [chalk.greenBright.bold("✅ Typo Check Passed")],
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -302,7 +302,7 @@ const runChecker = async (rootDir: string): Promise<void> => {
   });
 
   console.log(
-    chalk.blue(
+    chalk.blueBright.bold(
       `🔍 Building internal dictionary from ${files.length} files...\n`
     )
   );

@@ -221,15 +221,15 @@ var displayTypos = (typos) => {
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(chalk.yellow("\u26A0\uFE0F Typos found:\n"));
+  console.log(chalk.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
-  console.log(chalk.redBright(`
+  console.log(chalk.redBright.bold(`
 \u274C Total typos: ${typos.length}
 `));
 };
 var displaySuccess = (fileCount) => {
   const table = new Table({
-    head: [chalk.green("\u2705 Typo Check Passed")]
+    head: [chalk.greenBright.bold("\u2705 Typo Check Passed")]
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -244,7 +244,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
     ignore: ["node_modules"]
   });
   console.log(
-    chalk.blue(
+    chalk.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
 `
     )
