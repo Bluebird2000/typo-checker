@@ -20,12 +20,18 @@
     "typo-checker": "node dist/index.js"
   },
   "typoChecker": {
-    "whitelist": ["quickteller", "gmail", "biller", "Quicktag", "Billers"]
+    "whitelist": [
+      "exampleVariable",
+      "anotherExample",
+      "myFunction",
+      "someConstant"
+    ]
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Bluebird2000/@bluebird-helpers.git"
+    "url": "git+https://github.com/Bluebird2000/typo-checker.git"
   },
+  "homepage": "https://github.com/Bluebird2000/typo-checker#readme",
   "keywords": [
     "typo",
     "checker",
@@ -33,7 +39,7 @@
     "lint",
     "variable"
   ],
-  "author": "Bluebird - https://github.com/Bluebird2000",
+  "author": "https://github.com/Bluebird2000/typo-checker",
   "license": "MIT",
   "dependencies": {
     "@typescript-eslint/typescript-estree": "^8.33.1",

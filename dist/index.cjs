@@ -157,38 +157,6 @@ var loadNspell = () => __async(null, null, function* () {
   const dict = yield import_dictionary_en.default;
   return (0, import_nspell.default)(dict);
 });
-var isUsUkVariant = (word1, word2) => {
-  if (word1 === word2) return false;
-  const w1 = word1.toLowerCase();
-  const w2 = word2.toLowerCase();
-  const variants = [
-    [/(.)our$/, /(.)or$/],
-    // colour/color
-    [/(.)ise$/, /(.)ize$/],
-    // organise/organize
-    [/(.)yse$/, /(.)yze$/],
-    // analyse/analyze
-    [/(.)re$/, /(.)er$/],
-    // centre/center
-    [/(.)ll$/, /(.)l$/],
-    // travelling/traveling
-    [/(.)ogue$/, /(.)og$/],
-    // catalogue/catalog
-    [/(.)ce$/, /(.)se$/],
-    // defence/defense
-    [/(.)ence$/, /(.)ense$/],
-    [/(.)vouri$/, /(.)vori$/]
-    // favourite/favorite
-  ];
-  for (const [uk, us] of variants) {
-    if (uk.test(w1) && us.test(w2) || us.test(w1) && uk.test(w2)) {
-      const stemW1 = w1.replace(uk, "$1");
-      const stemW2 = w2.replace(us, "$1");
-      if (stemW1 === stemW2) return true;
-    }
-  }
-  return false;
-};
 var isValidWord = (word, projectDict, spell) => {
   const lower = word.toLowerCase();
   if (lower.length <= 2 || /^[A-Z]+$/.test(word) || // Acronyms
@@ -199,6 +167,16 @@ var isValidWord = (word, projectDict, spell) => {
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
+  }
+  return true;
+};
+var areAllSuggestionsVariants = (word, suggestions, spell) => {
+  const variants = new Set(suggestions.map((s) => s.toLowerCase()));
+  variants.add(word.toLowerCase());
+  for (const variant of variants) {
+    if (!spell.correct(variant)) {
+      return false;
+    }
   }
   return true;
 };
@@ -218,10 +196,12 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
       )) {
         const lower = part.toLowerCase();
         if (isValidWord(part, projectDict, spell)) {
-          let suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
-          suggestions = suggestions.filter(
-            (s) => !isUsUkVariant(lower, s.toLowerCase())
+          const suggestions = spell.suggest(lower).filter(
+            (s) => s.toLowerCase() !== lower
           );
+          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
+            continue;
+          }
           if (suggestions.length > 0) {
             typos.push({
               file,
@@ -264,15 +244,15 @@ var displayTypos = (typos) => {
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(import_chalk.default.yellow("\u26A0\uFE0F Typos found:\n"));
+  console.log(import_chalk.default.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
-  console.log(import_chalk.default.redBright(`
+  console.log(import_chalk.default.redBright.bold(`
 \u274C Total typos: ${typos.length}
 `));
 };
 var displaySuccess = (fileCount) => {
   const table = new import_cli_table3.default({
-    head: [import_chalk.default.green("\u2705 Typo Check Passed")]
+    head: [import_chalk.default.greenBright.bold("\u2705 Typo Check Passed")]
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -287,7 +267,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
     ignore: ["node_modules"]
   });
   console.log(
-    import_chalk.default.blue(
+    import_chalk.default.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
 `
     )
