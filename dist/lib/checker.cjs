@@ -99,7 +99,34 @@ var predefinedWhitelist = /* @__PURE__ */ new Set([
   "estree",
   "http",
   "www",
-  "utf"
+  "utf",
+  "skia",
+  "utils",
+  "shopify",
+  "react",
+  "redux",
+  "reactjs",
+  "tanstack",
+  "src",
+  "react-query",
+  "png",
+  "jpg",
+  "svg",
+  "util",
+  "redux",
+  "debounce",
+  "colours",
+  "naira",
+  "enquiry",
+  "telco",
+  "otp",
+  "rgba",
+  "dayjs",
+  "glo",
+  "mtn",
+  "airtel",
+  "etisalat",
+  "9mobile"
 ]);
 var dynamicWhitelist = /* @__PURE__ */ new Set();
 var loadConfig = (rootDir) => {
@@ -179,6 +206,9 @@ var isValidWord = (word, projectDict, spell) => {
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
   }
+  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
+    return false;
+  }
   return true;
 };
 var areAllSuggestionsVariants = (word, suggestions, spell) => {
@@ -207,11 +237,9 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
       )) {
         const lower = part.toLowerCase();
         if (isValidWord(part, projectDict, spell)) {
-          const suggestions = spell.suggest(lower).filter(
-            (s) => s.toLowerCase() !== lower
-          );
+          const suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
           if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
-            continue;
+            return;
           }
           if (suggestions.length > 0) {
             typos.push({
@@ -270,13 +298,42 @@ var displaySuccess = (fileCount) => {
   table.push(["Accuracy: 100%"]);
   console.log(table.toString());
 };
+var shouldIgnoreFile = (filePath, rootDir) => {
+  const relPath = import_path.default.relative(rootDir, filePath).replace(/\\/g, "/");
+  const ignoredFiles = /* @__PURE__ */ new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts",
+    "styles.ts",
+    "styles.js",
+    "config.js",
+    "config.ts",
+    "store.ts",
+    "store.js",
+    "colours.ts",
+    "colours.js",
+    "theme.ts",
+    "theme.js"
+  ]);
+  const baseName = import_path.default.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
+  const pathParts = relPath.toLowerCase().split("/");
+  if (pathParts.some((part) => part.includes("asset"))) {
+    return true;
+  }
+  return false;
+};
 var runChecker = (rootDir) => __async(null, null, function* () {
   loadConfig(rootDir);
-  const files = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
+  const allFiles = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
+  const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
   console.log(
     import_chalk.default.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...

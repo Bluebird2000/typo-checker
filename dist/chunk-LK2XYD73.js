@@ -1,27 +1,3 @@
-#!/usr/bin/env node
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
@@ -44,22 +20,22 @@ var __async = (__this, __arguments, generator) => {
 };
 
 // lib/checker.ts
-var import_fs = __toESM(require("fs"), 1);
-var import_path = __toESM(require("path"), 1);
-var import_url = require("url");
-var import_fast_glob = __toESM(require("fast-glob"), 1);
-var import_chalk = __toESM(require("chalk"), 1);
-var import_cli_table3 = __toESM(require("cli-table3"), 1);
-var import_nspell = __toESM(require("nspell"), 1);
-var import_dictionary_en = __toESM(require("dictionary-en"), 1);
-var import_typescript_estree = require("@typescript-eslint/typescript-estree");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import fg from "fast-glob";
+import chalk from "chalk";
+import Table from "cli-table3";
+import nspell from "nspell";
+import dictionaryEn from "dictionary-en";
+import { parse } from "@typescript-eslint/typescript-estree";
 var import_meta = {};
 var __dirname;
 try {
-  const __filename = (0, import_url.fileURLToPath)(import_meta.url);
-  __dirname = import_path.default.dirname(__filename);
+  const __filename = fileURLToPath(import_meta.url);
+  __dirname = path.dirname(__filename);
 } catch (e) {
-  __dirname = import_path.default.resolve();
+  __dirname = path.resolve();
 }
 var predefinedWhitelist = /* @__PURE__ */ new Set([
   "eslint",
@@ -109,35 +85,27 @@ var predefinedWhitelist = /* @__PURE__ */ new Set([
   "colours",
   "naira",
   "enquiry",
-  "telco",
-  "otp",
-  "rgba",
-  "dayjs",
-  "glo",
-  "mtn",
-  "airtel",
-  "etisalat",
-  "9mobile"
+  "telco"
 ]);
 var dynamicWhitelist = /* @__PURE__ */ new Set();
 var loadConfig = (rootDir) => {
-  const configPath = import_path.default.join(rootDir, "typo-checker.config.json");
-  const packageJsonPath = import_path.default.join(rootDir, "package.json");
+  const configPath = path.join(rootDir, "typo-checker.config.json");
+  const packageJsonPath = path.join(rootDir, "package.json");
   let config = {};
-  if (import_fs.default.existsSync(configPath)) {
+  if (fs.existsSync(configPath)) {
     try {
-      config = JSON.parse(import_fs.default.readFileSync(configPath, "utf8"));
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
     } catch (err) {
-      console.error(import_chalk.default.red("Error parsing typo-checker.config.json"), err);
+      console.error(chalk.red("Error parsing typo-checker.config.json"), err);
     }
-  } else if (import_fs.default.existsSync(packageJsonPath)) {
+  } else if (fs.existsSync(packageJsonPath)) {
     try {
-      const pkg = JSON.parse(import_fs.default.readFileSync(packageJsonPath, "utf8"));
+      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
       if (pkg.typoChecker) {
         config = pkg.typoChecker;
       }
     } catch (err) {
-      console.error(import_chalk.default.red("Error parsing package.json"), err);
+      console.error(chalk.red("Error parsing package.json"), err);
     }
   }
   dynamicWhitelist = new Set(
@@ -162,7 +130,7 @@ var walkAST = (node, cb) => {
 };
 var parseCode = (code) => {
   try {
-    return (0, import_typescript_estree.parse)(code, { loc: true, jsx: true, useJSXTextNode: true });
+    return parse(code, { loc: true, jsx: true, useJSXTextNode: true });
   } catch (e) {
     return null;
   }
@@ -181,10 +149,10 @@ var extractWordsFromCode = (code) => {
   return words;
 };
 var loadNspell = () => __async(null, null, function* () {
-  const dict = yield import_dictionary_en.default;
+  const dict = yield dictionaryEn;
   const aff = Buffer.from(dict.aff);
   const dic = Buffer.from(dict.dic);
-  return (0, import_nspell.default)(aff, dic);
+  return nspell(aff, dic);
 });
 var isValidWord = (word, projectDict, spell) => {
   const lower = word.toLowerCase();
@@ -195,9 +163,6 @@ var isValidWord = (word, projectDict, spell) => {
   const suggestions = spell.suggest(lower);
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
-    return false;
-  }
-  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
     return false;
   }
   return true;
@@ -215,7 +180,7 @@ var areAllSuggestionsVariants = (word, suggestions, spell) => {
 var extractTyposFromCode = (code, spell, projectDict, file) => {
   const ast = parseCode(code);
   if (!ast) {
-    console.error(import_chalk.default.red(`Parsing error in ${file}`));
+    console.error(chalk.red(`Parsing error in ${file}`));
     return [];
   }
   const typos = [];
@@ -248,7 +213,7 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
 };
 var readFileSyncSafe = (file) => {
   try {
-    return import_fs.default.readFileSync(file, "utf8");
+    return fs.readFileSync(file, "utf8");
   } catch (e) {
     return "";
   }
@@ -267,22 +232,22 @@ var buildProjectDictionary = (files, spell) => {
   return dict;
 };
 var displayTypos = (typos) => {
-  const table = new import_cli_table3.default({
+  const table = new Table({
     head: ["File", "Line", "Word", "Suggestions"],
     colWidths: [40, 10, 20, 40]
   });
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(import_chalk.default.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
+  console.log(chalk.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
-  console.log(import_chalk.default.redBright.bold(`
+  console.log(chalk.redBright.bold(`
 \u274C Total typos: ${typos.length}
 `));
 };
 var displaySuccess = (fileCount) => {
-  const table = new import_cli_table3.default({
-    head: [import_chalk.default.greenBright.bold("\u2705 Typo Check Passed")]
+  const table = new Table({
+    head: [chalk.greenBright.bold("\u2705 Typo Check Passed")]
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -290,24 +255,16 @@ var displaySuccess = (fileCount) => {
   console.log(table.toString());
 };
 var shouldIgnoreFile = (filePath, rootDir) => {
-  const relPath = import_path.default.relative(rootDir, filePath).replace(/\\/g, "/");
+  const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/");
   const ignoredFiles = /* @__PURE__ */ new Set([
     "babel.config.js",
     "babel.config.ts",
     "metro.config.js",
     "metro.config.ts",
     "styles.ts",
-    "styles.js",
-    "config.js",
-    "config.ts",
-    "store.ts",
-    "store.js",
-    "colours.ts",
-    "colours.js",
-    "theme.ts",
-    "theme.js"
+    "styles.js"
   ]);
-  const baseName = import_path.default.basename(relPath).toLowerCase();
+  const baseName = path.basename(relPath).toLowerCase();
   if (ignoredFiles.has(baseName)) {
     return true;
   }
@@ -319,14 +276,14 @@ var shouldIgnoreFile = (filePath, rootDir) => {
 };
 var runChecker = (rootDir) => __async(null, null, function* () {
   loadConfig(rootDir);
-  const allFiles = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
+  const allFiles = yield fg(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
   const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
   console.log(
-    import_chalk.default.blueBright.bold(
+    chalk.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
 `
     )
@@ -338,13 +295,13 @@ var runChecker = (rootDir) => __async(null, null, function* () {
       readFileSyncSafe(file),
       spell,
       projectDict,
-      import_path.default.relative(rootDir, file)
+      path.relative(rootDir, file)
     )
   );
   typos.length ? displayTypos(typos) : displaySuccess(files.length);
 });
 var checker_default = runChecker;
 
-// bin/index.ts
-var projectRoot = process.cwd();
-checker_default(projectRoot);
+export {
+  checker_default
+};
