@@ -1,6 +1,6 @@
 # Typo Checker CLI
 
-[![npm version](https://img.shields.io/npm/v/typo-checker-cli.svg)](https://www.npmjs.com/package/typo-checker-cli)
+[![npm version](https://img.shields.io/npm/v/typo-checker-cli.svg)](https://www.npmjs.com/package/typo-checker)
 [![License](https://img.shields.io/npm/l/typo-checker-cli.svg)](LICENSE)
 
 A powerful command-line tool and library to find typos in your JavaScript, TypeScript, JSX, and TSX source code files by analyzing string literals using AST parsing and spell-checking with [nspell](https://github.com/wooorm/nspell).
@@ -33,6 +33,14 @@ yarn add typo-checker
 ```
 
 ## Configuration
+In your project’s package.json, add:
+
+```bash
+"scripts": {
+  "typo-checker": "typo-checker"
+}
+```
+
 You can customize the whitelist of allowed words (to reduce false positives) by creating a ```typo-checker.config.json``` in your project root:
 
 ```bash
