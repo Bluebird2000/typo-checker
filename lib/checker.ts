@@ -2,12 +2,11 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
-import * as acorn from "acorn";
 import chalk from "chalk";
 import table from "cli-table3";
 import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
-import { parse } from '@typescript-eslint/typescript-estree';
+import { parse } from "@typescript-eslint/typescript-estree";
 
 let __dirname;
 try {
@@ -29,24 +28,25 @@ interface TypoEntry {
 const splitCompound = (word: string): string[] => {
   return word
     .split(/[_\s]+/)
-    .flatMap((segment) =>
-      segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean)
-    );
+    .flatMap((segment) => segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
 };
 
-// Recursive simple walker for typescript-estree AST
-function walk(node: any, callback: (node: any) => void) {
+function walk(node: unknown, callback: (node: any) => void): void {
+  if (!node || typeof node !== "object") return;
+
   callback(node);
-  for (const key in node) {
-    if (Object.prototype.hasOwnProperty.call(node, key)) {
-      const child = node[key];
-      if (Array.isArray(child)) {
-        for (const c of child) {
-          if (c && typeof c.type === 'string') walk(c, callback);
+
+  for (const key of Object.keys(node)) {
+    const child = (node as any)[key];
+
+    if (Array.isArray(child)) {
+      for (const c of child) {
+        if (c && typeof c.type === "string") {
+          walk(c, callback);
         }
-      } else if (child && typeof child.type === 'string') {
-        walk(child, callback);
       }
+    } else if (child && typeof child.type === "string") {
+      walk(child, callback);
     }
   }
 }
@@ -142,7 +142,9 @@ const runChecker = async (rootDir: string): Promise<void> => {
   });
 
   console.log(
-    chalk.blue(`🔍 Building internal dictionary from ${files.length} files...\n`)
+    chalk.blue(
+      `🔍 Building internal dictionary from ${files.length} files...\n`
+    )
   );
 
   const projectDict: ProjectDictionary = new Set();
