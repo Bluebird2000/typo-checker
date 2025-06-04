@@ -51,6 +51,10 @@ var import_fast_glob = __toESM(require("fast-glob"), 1);
 var acorn = __toESM(require("acorn"), 1);
 var import_leven = __toESM(require("leven"), 1);
 var import_chalk = __toESM(require("chalk"), 1);
+var import_cli_table3 = __toESM(require("cli-table3"), 1);
+var acornWalk = __toESM(require("acorn-walk"), 1);
+var import_dictionary_en = __toESM(require("dictionary-en"), 1);
+var import_nspell = __toESM(require("nspell"), 1);
 var import_meta = {};
 var __dirname;
 try {
@@ -59,95 +63,131 @@ try {
 } catch (e) {
   __dirname = __dirname || import_path.default.resolve();
 }
-var readDictionary = () => {
-  const words = import_fs.default.readFileSync(
-    import_path.default.join(__dirname, "dictionary.txt"),
-    "utf8"
-  );
-  return new Set(
-    words.split(/\r?\n/).map((w) => w.trim().toLowerCase()).filter(Boolean)
+var splitCompound = (word) => {
+  return word.split(/[_\s]+/).flatMap(
+    (segment) => segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean)
   );
 };
-var isLikelyTypo = (word, dictionary) => {
+var extractWordsFromCode = (code) => {
+  const words = [];
+  try {
+    const ast = acorn.parse(code, {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      locations: true
+    });
+    acornWalk.full(ast, (node) => {
+      if (node.type === "Identifier") {
+        words.push(...splitCompound(node.name));
+      } else if (node.type === "Literal" && typeof node.value === "string") {
+        const literalWords = node.value.split(/[^a-zA-Z]+/);
+        words.push(...literalWords.filter(Boolean));
+      }
+    });
+  } catch (e) {
+  }
+  return words;
+};
+var isLikelyTypo = (word, internalDict, spell) => {
   const matches = [];
-  for (const dictWord of dictionary) {
+  for (const dictWord of internalDict) {
     const distance = (0, import_leven.default)(word, dictWord);
     if (distance > 0 && distance <= 2) {
       matches.push(dictWord);
     }
   }
+  if (!spell.correct(word)) {
+    const spellSuggestions = spell.suggest(word).slice(0, 5);
+    matches.push(...spellSuggestions.filter((s) => !matches.includes(s)));
+  }
   return matches.length ? matches : null;
 };
-var extractIdentifiersAndStrings = (code) => {
-  const identifiers = /* @__PURE__ */ new Set();
-  const strings = /* @__PURE__ */ new Set();
+var extractTyposFromCode = (code, internalDict, spell, file) => {
+  const typos = [];
   try {
     const ast = acorn.parse(code, {
       ecmaVersion: "latest",
-      sourceType: "module"
+      sourceType: "module",
+      locations: true
     });
-    const walk = (node) => {
-      var _a, _b;
-      if (!node || typeof node !== "object") return;
-      switch (node.type) {
-        case "VariableDeclarator":
-          if ((_a = node.id) == null ? void 0 : _a.name) identifiers.add(node.id.name);
-          break;
-        case "FunctionDeclaration":
-          if ((_b = node.id) == null ? void 0 : _b.name) identifiers.add(node.id.name);
-          break;
-        case "Literal":
-          if (typeof node.value === "string") strings.add(node.value);
-          break;
-      }
-      for (const key in node) {
-        const child = node[key];
-        if (Array.isArray(child)) {
-          child.forEach(walk);
-        } else if (typeof child === "object" && child !== null) {
-          walk(child);
+    acornWalk.full(ast, (node) => {
+      if (node.type === "Identifier" || node.type === "Literal" && typeof node.value === "string") {
+        const raw = node.name || node.value;
+        const parts = typeof raw === "string" ? splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w)) : [];
+        for (const part of parts) {
+          const lower = part.toLowerCase();
+          if (lower && !internalDict.has(lower) && !spell.correct(lower)) {
+            const suggestions = isLikelyTypo(lower, internalDict, spell);
+            if (suggestions) {
+              typos.push({
+                file,
+                line: node.loc.start.line,
+                word: part,
+                suggestions
+              });
+            }
+          }
         }
       }
-    };
-    walk(ast);
-  } catch (e) {
-    console.error(import_chalk.default.red(`Failed to parse code: ${e.message}`));
+    });
+  } catch (err) {
+    console.error(import_chalk.default.red(`Parsing error in ${file}: ${err.message}`));
   }
-  return { identifiers, strings };
+  return typos;
 };
 var runChecker = (rootDir) => __async(null, null, function* () {
-  const dictionary = readDictionary();
+  const dictData = yield new Promise((resolve, reject) => {
+    (0, import_dictionary_en.default)((err, dict) => {
+      if (err) reject(err);
+      else resolve((0, import_nspell.default)(dict));
+    });
+  });
+  const spell = dictData;
   const files = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
-  console.log(import_chalk.default.blue(`Checking for typos in ${files.length} files...
+  console.log(import_chalk.default.blue(`\u{1F50D} Building internal dictionary from ${files.length} files...
 `));
-  let typoFound = false;
+  const internalDict = /* @__PURE__ */ new Set();
   for (const file of files) {
     const code = import_fs.default.readFileSync(file, "utf8");
-    const { identifiers, strings } = extractIdentifiersAndStrings(code);
-    for (const word of [...identifiers, ...strings]) {
-      const lower = word.toLowerCase();
-      if (!dictionary.has(lower)) {
-        const suggestions = isLikelyTypo(lower, dictionary);
-        if (suggestions) {
-          typoFound = true;
-          console.log(
-            import_chalk.default.yellow(
-              `Possible typo in "${import_path.default.relative(
-                rootDir,
-                file
-              )}": "${word}" \u2192 Suggestions: ${suggestions.join(", ")}`
-            )
-          );
-        }
+    const words = extractWordsFromCode(code);
+    for (const word of words) {
+      const cleaned = word.toLowerCase();
+      if (cleaned && /^[a-zA-Z]+$/.test(cleaned)) {
+        internalDict.add(cleaned);
       }
     }
   }
-  if (!typoFound) {
-    console.log(import_chalk.default.green("\u2705 No typos found in identifiers or strings."));
+  const allTypos = [];
+  for (const file of files) {
+    const code = import_fs.default.readFileSync(file, "utf8");
+    const typos = extractTyposFromCode(code, internalDict, spell, import_path.default.relative(rootDir, file));
+    allTypos.push(...typos);
+  }
+  if (allTypos.length > 0) {
+    const typoTable = new import_cli_table3.default({
+      head: ["File", "Line", "Word", "Suggestions"],
+      colWidths: [40, 10, 20, 40]
+    });
+    for (const { file, line, word, suggestions } of allTypos) {
+      typoTable.push([file, line, word, suggestions.join(", ")]);
+    }
+    console.log(import_chalk.default.yellow("\u26A0\uFE0F  Typos found:\n"));
+    console.log(typoTable.toString());
+    console.log(import_chalk.default.redBright(`
+\u274C Total typos: ${allTypos.length}
+`));
+  } else {
+    const successTable = new import_cli_table3.default({
+      head: [import_chalk.default.green("\u2705 Typo Check Passed")]
+    });
+    successTable.push(["Checked Files: " + files.length]);
+    successTable.push(["Total Typos: 0"]);
+    successTable.push(["Accuracy: 100%"]);
+    console.log(successTable.toString());
   }
 });
 var checker_default = runChecker;
