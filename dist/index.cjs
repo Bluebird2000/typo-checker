@@ -48,13 +48,11 @@ var import_fs = __toESM(require("fs"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_url = require("url");
 var import_fast_glob = __toESM(require("fast-glob"), 1);
-var acorn = __toESM(require("acorn"), 1);
-var import_leven = __toESM(require("leven"), 1);
 var import_chalk = __toESM(require("chalk"), 1);
 var import_cli_table3 = __toESM(require("cli-table3"), 1);
-var acornWalk = __toESM(require("acorn-walk"), 1);
-var import_dictionary_en = __toESM(require("dictionary-en"), 1);
 var import_nspell = __toESM(require("nspell"), 1);
+var import_dictionary_en = __toESM(require("dictionary-en"), 1);
+var import_typescript_estree = require("@typescript-eslint/typescript-estree");
 var import_meta = {};
 var __dirname;
 try {
@@ -68,15 +66,30 @@ var splitCompound = (word) => {
     (segment) => segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean)
   );
 };
+function walk(node, callback) {
+  callback(node);
+  for (const key in node) {
+    if (Object.prototype.hasOwnProperty.call(node, key)) {
+      const child = node[key];
+      if (Array.isArray(child)) {
+        for (const c of child) {
+          if (c && typeof c.type === "string") walk(c, callback);
+        }
+      } else if (child && typeof child.type === "string") {
+        walk(child, callback);
+      }
+    }
+  }
+}
 var extractWordsFromCode = (code) => {
   const words = [];
   try {
-    const ast = acorn.parse(code, {
-      ecmaVersion: "latest",
-      sourceType: "module",
-      locations: true
+    const ast = (0, import_typescript_estree.parse)(code, {
+      loc: true,
+      jsx: true,
+      useJSXTextNode: true
     });
-    acornWalk.full(ast, (node) => {
+    walk(ast, (node) => {
       if (node.type === "Identifier") {
         words.push(...splitCompound(node.name));
       } else if (node.type === "Literal" && typeof node.value === "string") {
@@ -88,44 +101,34 @@ var extractWordsFromCode = (code) => {
   }
   return words;
 };
-var isLikelyTypo = (word, internalDict, spell) => {
-  const matches = [];
-  for (const dictWord of internalDict) {
-    const distance = (0, import_leven.default)(word, dictWord);
-    if (distance > 0 && distance <= 2) {
-      matches.push(dictWord);
-    }
-  }
-  if (!spell.correct(word)) {
-    const spellSuggestions = spell.suggest(word).slice(0, 5);
-    matches.push(...spellSuggestions.filter((s) => !matches.includes(s)));
-  }
-  return matches.length ? matches : null;
-};
-var extractTyposFromCode = (code, internalDict, spell, file) => {
+var loadNspell = () => __async(null, null, function* () {
+  const dict = yield import_dictionary_en.default;
+  return (0, import_nspell.default)(dict);
+});
+var extractTyposFromCode = (code, spell, projectDict, file) => {
   const typos = [];
   try {
-    const ast = acorn.parse(code, {
-      ecmaVersion: "latest",
-      sourceType: "module",
-      locations: true
+    const ast = (0, import_typescript_estree.parse)(code, {
+      loc: true,
+      jsx: true,
+      useJSXTextNode: true
     });
-    acornWalk.full(ast, (node) => {
+    walk(ast, (node) => {
       if (node.type === "Identifier" || node.type === "Literal" && typeof node.value === "string") {
         const raw = node.name || node.value;
         const parts = typeof raw === "string" ? splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w)) : [];
         for (const part of parts) {
           const lower = part.toLowerCase();
-          if (lower && !internalDict.has(lower) && !spell.correct(lower)) {
-            const suggestions = isLikelyTypo(lower, internalDict, spell);
-            if (suggestions) {
-              typos.push({
-                file,
-                line: node.loc.start.line,
-                word: part,
-                suggestions
-              });
-            }
+          if (!lower || lower.length <= 2 || /^[A-Z]+$/.test(part)) continue;
+          if (projectDict.has(lower)) continue;
+          if (!spell.correct(lower)) {
+            const suggestions = spell.suggest(lower);
+            typos.push({
+              file,
+              line: node.loc.start.line,
+              word: part,
+              suggestions
+            });
           }
         }
       }
@@ -136,35 +139,36 @@ var extractTyposFromCode = (code, internalDict, spell, file) => {
   return typos;
 };
 var runChecker = (rootDir) => __async(null, null, function* () {
-  const dictData = yield new Promise((resolve, reject) => {
-    (0, import_dictionary_en.default)((err, dict) => {
-      if (err) reject(err);
-      else resolve((0, import_nspell.default)(dict));
-    });
-  });
-  const spell = dictData;
   const files = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
-  console.log(import_chalk.default.blue(`\u{1F50D} Building internal dictionary from ${files.length} files...
-`));
-  const internalDict = /* @__PURE__ */ new Set();
+  console.log(
+    import_chalk.default.blue(`\u{1F50D} Building internal dictionary from ${files.length} files...
+`)
+  );
+  const projectDict = /* @__PURE__ */ new Set();
   for (const file of files) {
     const code = import_fs.default.readFileSync(file, "utf8");
     const words = extractWordsFromCode(code);
     for (const word of words) {
       const cleaned = word.toLowerCase();
       if (cleaned && /^[a-zA-Z]+$/.test(cleaned)) {
-        internalDict.add(cleaned);
+        projectDict.add(cleaned);
       }
     }
   }
+  const spell = yield loadNspell();
   const allTypos = [];
   for (const file of files) {
     const code = import_fs.default.readFileSync(file, "utf8");
-    const typos = extractTyposFromCode(code, internalDict, spell, import_path.default.relative(rootDir, file));
+    const typos = extractTyposFromCode(
+      code,
+      spell,
+      projectDict,
+      import_path.default.relative(rootDir, file)
+    );
     allTypos.push(...typos);
   }
   if (allTypos.length > 0) {

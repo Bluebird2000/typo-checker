@@ -3,10 +3,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import * as acorn from "acorn";
-import leven from "leven";
 import chalk from "chalk";
 import table from "cli-table3";
-import * as acornWalk from "acorn-walk";
+import nspell from "nspell";
+import dictionaryEn from "dictionary-en";
+import { parse } from '@typescript-eslint/typescript-estree';
 
 let __dirname;
 try {
@@ -16,7 +17,7 @@ try {
   __dirname = __dirname || path.resolve();
 }
 
-type Dictionary = Set<string>;
+type ProjectDictionary = Set<string>;
 
 interface TypoEntry {
   file: string;
@@ -27,23 +28,41 @@ interface TypoEntry {
 
 const splitCompound = (word: string): string[] => {
   return word
-    .split(/[_\s]+/) // snake_case and whitespace
+    .split(/[_\s]+/)
     .flatMap((segment) =>
-      segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean) // camelCase and non-alphas
+      segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean)
     );
 };
+
+// Recursive simple walker for typescript-estree AST
+function walk(node: any, callback: (node: any) => void) {
+  callback(node);
+  for (const key in node) {
+    if (Object.prototype.hasOwnProperty.call(node, key)) {
+      const child = node[key];
+      if (Array.isArray(child)) {
+        for (const c of child) {
+          if (c && typeof c.type === 'string') walk(c, callback);
+        }
+      } else if (child && typeof child.type === 'string') {
+        walk(child, callback);
+      }
+    }
+  }
+}
+
 
 const extractWordsFromCode = (code: string): string[] => {
   const words: string[] = [];
 
   try {
-    const ast = acorn.parse(code, {
-      ecmaVersion: "latest",
-      sourceType: "module",
-      locations: true,
+    const ast = parse(code, {
+      loc: true,
+      jsx: true,
+      useJSXTextNode: true,
     });
 
-    acornWalk.full(ast, (node: any) => {
+    walk(ast as any, (node: any) => {
       if (node.type === "Identifier") {
         words.push(...splitCompound(node.name));
       } else if (node.type === "Literal" && typeof node.value === "string") {
@@ -58,51 +77,52 @@ const extractWordsFromCode = (code: string): string[] => {
   return words;
 };
 
-
-const isLikelyTypo = (word: string, dictionary: Dictionary): string[] | null => {
-  const matches: string[] = [];
-  for (const dictWord of dictionary) {
-    const distance = leven(word, dictWord);
-    if (distance > 0 && distance <= 2) {
-      matches.push(dictWord);
-    }
-  }
-  return matches.length ? matches : null;
+// ✅ FIXED VERSION
+const loadNspell = async (): Promise<nspell> => {
+  const dict = await dictionaryEn; // now async
+  return nspell(dict);
 };
 
 const extractTyposFromCode = (
   code: string,
-  dictionary: Dictionary,
+  spell: nspell,
+  projectDict: ProjectDictionary,
   file: string
 ): TypoEntry[] => {
   const typos: TypoEntry[] = [];
 
   try {
-    const ast = acorn.parse(code, {
-      ecmaVersion: "latest",
-      sourceType: "module",
-      locations: true,
+    const ast = parse(code, {
+      loc: true,
+      jsx: true,
+      useJSXTextNode: true,
     });
 
-    acornWalk.full(ast, (node: any) => {
-      if (node.type === "Identifier" || (node.type === "Literal" && typeof node.value === "string")) {
+    walk(ast as any, (node: any) => {
+      if (
+        node.type === "Identifier" ||
+        (node.type === "Literal" && typeof node.value === "string")
+      ) {
         const raw = node.name || node.value;
-        const parts = typeof raw === "string"
-          ? splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w))
-          : [];
+        const parts =
+          typeof raw === "string"
+            ? splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w))
+            : [];
 
         for (const part of parts) {
           const lower = part.toLowerCase();
-          if (lower && !dictionary.has(lower)) {
-            const suggestions = isLikelyTypo(lower, dictionary);
-            if (suggestions) {
-              typos.push({
-                file,
-                line: node.loc.start.line,
-                word: part,
-                suggestions,
-              });
-            }
+
+          if (!lower || lower.length <= 2 || /^[A-Z]+$/.test(part)) continue;
+          if (projectDict.has(lower)) continue;
+
+          if (!spell.correct(lower)) {
+            const suggestions = spell.suggest(lower);
+            typos.push({
+              file,
+              line: node.loc.start.line,
+              word: part,
+              suggestions,
+            });
           }
         }
       }
@@ -121,28 +141,35 @@ const runChecker = async (rootDir: string): Promise<void> => {
     ignore: ["node_modules"],
   });
 
-  console.log(chalk.blue(`🔍 Building internal dictionary from ${files.length} files...\n`));
+  console.log(
+    chalk.blue(`🔍 Building internal dictionary from ${files.length} files...\n`)
+  );
 
-  const dictionary: Dictionary = new Set();
+  const projectDict: ProjectDictionary = new Set();
 
-  // Build dictionary
   for (const file of files) {
     const code = fs.readFileSync(file, "utf8");
     const words = extractWordsFromCode(code);
     for (const word of words) {
       const cleaned = word.toLowerCase();
       if (cleaned && /^[a-zA-Z]+$/.test(cleaned)) {
-        dictionary.add(cleaned);
+        projectDict.add(cleaned);
       }
     }
   }
 
-  // Check typos
+  const spell = await loadNspell();
+
   const allTypos: TypoEntry[] = [];
 
   for (const file of files) {
     const code = fs.readFileSync(file, "utf8");
-    const typos = extractTyposFromCode(code, dictionary, path.relative(rootDir, file));
+    const typos = extractTyposFromCode(
+      code,
+      spell,
+      projectDict,
+      path.relative(rootDir, file)
+    );
     allTypos.push(...typos);
   }
 
@@ -171,6 +198,5 @@ const runChecker = async (rootDir: string): Promise<void> => {
     console.log(successTable.toString());
   }
 };
-
 
 export default runChecker;
