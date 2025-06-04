@@ -59,7 +59,26 @@ const predefinedWhitelist = new Set<string>([
   "estree",
   "http",
   "www",
-  "utf"
+  "utf",
+  "skia",
+  "utils",
+  "shopify",
+  "react",
+  "redux",
+  "reactjs",
+  "tanstack",
+  "src",
+  "react-query",
+  "png",
+  "jpg",
+  "svg",
+  "util",
+  "redux",
+  "debounce",
+  "colours",
+  "naira",
+  "enquiry",
+  "telco",
 ]);
 
 let dynamicWhitelist = new Set<string>();
@@ -164,7 +183,7 @@ const isValidWord = (
 
   // If the word is already correct or suggestion contains itself, ignore
   const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map(s => s.toLowerCase()));
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
   }
@@ -176,8 +195,12 @@ const isValidWord = (
  * Check if all suggestions + original word are valid spellings
  * (indicating US/UK spelling variants)
  */
-const areAllSuggestionsVariants = (word: string, suggestions: string[], spell: nspell): boolean => {
-  const variants = new Set(suggestions.map(s => s.toLowerCase()));
+const areAllSuggestionsVariants = (
+  word: string,
+  suggestions: string[],
+  spell: nspell
+): boolean => {
+  const variants = new Set(suggestions.map((s) => s.toLowerCase()));
   variants.add(word.toLowerCase());
 
   for (const variant of variants) {
@@ -213,14 +236,17 @@ const extractTyposFromCode = (
 
         if (isValidWord(part, projectDict, spell)) {
           // Get suggestions excluding the word itself
-          const suggestions = spell.suggest(lower).filter(
-            (s) => s.toLowerCase() !== lower
-          );
+          const suggestions = spell
+            .suggest(lower)
+            .filter((s) => s.toLowerCase() !== lower);
 
           // Skip if all suggestions + word are valid spellings (US/UK variants)
-          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
+          if (
+            suggestions.length > 0 &&
+            areAllSuggestionsVariants(part, suggestions, spell)
+          ) {
             // This is just a US/UK variant difference - skip listing
-            continue;
+            return;
           }
 
           if (suggestions.length > 0) {
@@ -257,11 +283,7 @@ const buildProjectDictionary = (
     const code = readFileSyncSafe(file);
     for (const word of extractWordsFromCode(code)) {
       const lower = word.toLowerCase();
-      if (
-        lower.length > 2 &&
-        /^[a-zA-Z]+$/.test(lower) &&
-        spell.correct(lower)
-      ) {
+      if (lower.length > 2 && /^[a-zA-Z]+$/.test(lower) && spell.correct(lower)) {
         dict.add(lower);
       }
     }
@@ -295,14 +317,45 @@ const displaySuccess = (fileCount: number) => {
   console.log(table.toString());
 };
 
+const shouldIgnoreFile = (filePath: string, rootDir: string): boolean => {
+  const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/"); // normalize slashes
+
+  // Ignore files by exact name
+  const ignoredFiles = new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts",
+    "styles.ts",
+    "styles.js",
+  ]);
+  const baseName = path.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
+
+  // Ignore folders with "asset" or "assets" anywhere in path
+  // Also ignore "assets/svgs" or "assets/svg" folders
+  const pathParts = relPath.toLowerCase().split("/");
+  if (pathParts.some((part) => part.includes("asset"))) {
+    return true;
+  }
+
+  return false;
+};
+
 const runChecker = async (rootDir: string): Promise<void> => {
   loadConfig(rootDir);
 
-  const files = await fg(["**/*.{js,ts,jsx,tsx}"], {
+  // Basic ignore for node_modules + specific files/folders
+  const allFiles = await fg(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"],
   });
+
+  // Filter files to ignore the specific configs, styles and assets folders
+  const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
 
   console.log(
     chalk.blueBright.bold(
