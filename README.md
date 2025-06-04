@@ -1,4 +1,4 @@
-# Typo Checker CLI
+# Typo Checker
 
 A powerful command-line tool and library to find typos in your JavaScript, TypeScript, JSX, and TSX source code files by analyzing string literals using AST parsing and spell-checking with [nspell](https://github.com/wooorm/nspell).
 
@@ -22,7 +22,7 @@ A powerful command-line tool and library to find typos in your JavaScript, TypeS
 ## Installation
 
 ```bash
-npm install typo-checker-cli 
+npm install typo-checker
 ```
 OR with yarn
 ```bash
