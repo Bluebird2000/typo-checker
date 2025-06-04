@@ -3,17 +3,17 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import chalk from "chalk";
-import table from "cli-table3";
+import Table from "cli-table3";
 import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
 import { parse } from "@typescript-eslint/typescript-estree";
 
-let __dirname;
+let __dirname: string;
 try {
   const __filename = fileURLToPath(import.meta.url);
   __dirname = path.dirname(__filename);
 } catch {
-  __dirname = __dirname || path.resolve();
+  __dirname = path.resolve();
 }
 
 type ProjectDictionary = Set<string>;
@@ -25,62 +25,64 @@ interface TypoEntry {
   suggestions: string[];
 }
 
-const splitCompound = (word: string): string[] => {
-  return word
+const splitCompound = (word: string): string[] =>
+  word
     .split(/[_\s]+/)
-    .flatMap((segment) => segment.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
-};
+    .flatMap((seg) => seg.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
 
-function walk(node: unknown, callback: (node: any) => void): void {
+const walkAST = (node: unknown, cb: (node: any) => void): void => {
   if (!node || typeof node !== "object") return;
-
-  callback(node);
-
-  for (const key of Object.keys(node)) {
+  cb(node);
+  for (const key in node) {
     const child = (node as any)[key];
-
     if (Array.isArray(child)) {
-      for (const c of child) {
-        if (c && typeof c.type === "string") {
-          walk(c, callback);
-        }
-      }
-    } else if (child && typeof child.type === "string") {
-      walk(child, callback);
+      child.forEach((c) => c?.type && walkAST(c, cb));
+    } else if (child?.type) {
+      walkAST(child, cb);
     }
   }
-}
+};
 
+const parseCode = (code: string) => {
+  try {
+    return parse(code, { loc: true, jsx: true, useJSXTextNode: true });
+  } catch {
+    return null;
+  }
+};
+
+const extractWordsFromNode = (node: any): string[] => {
+  if (node.type === "Identifier") {
+    return splitCompound(node.name);
+  }
+  if (node.type === "Literal" && typeof node.value === "string") {
+    return node.value.split(/[^a-zA-Z]+/).filter(Boolean);
+  }
+  return [];
+};
 
 const extractWordsFromCode = (code: string): string[] => {
+  const ast = parseCode(code);
+  if (!ast) return [];
+
   const words: string[] = [];
-
-  try {
-    const ast = parse(code, {
-      loc: true,
-      jsx: true,
-      useJSXTextNode: true,
-    });
-
-    walk(ast as any, (node: any) => {
-      if (node.type === "Identifier") {
-        words.push(...splitCompound(node.name));
-      } else if (node.type === "Literal" && typeof node.value === "string") {
-        const literalWords = node.value.split(/[^a-zA-Z]+/);
-        words.push(...literalWords.filter(Boolean));
-      }
-    });
-  } catch {
-    // ignore parse errors
-  }
-
+  walkAST(ast, (node) => words.push(...extractWordsFromNode(node)));
   return words;
 };
 
-// ✅ FIXED VERSION
 const loadNspell = async (): Promise<nspell> => {
-  const dict = await dictionaryEn; // now async
+  const dict = await dictionaryEn;
   return nspell(dict);
+};
+
+const isValidWord = (
+  word: string,
+  projectDict: ProjectDictionary,
+  spell: nspell
+): boolean => {
+  if (word.length <= 2 || /^[A-Z]+$/.test(word)) return false; // skip acronyms and short words
+  if (projectDict.has(word.toLowerCase())) return false;
+  return true;
 };
 
 const extractTyposFromCode = (
@@ -89,49 +91,95 @@ const extractTyposFromCode = (
   projectDict: ProjectDictionary,
   file: string
 ): TypoEntry[] => {
-  const typos: TypoEntry[] = [];
-
-  try {
-    const ast = parse(code, {
-      loc: true,
-      jsx: true,
-      useJSXTextNode: true,
-    });
-
-    walk(ast as any, (node: any) => {
-      if (
-        node.type === "Identifier" ||
-        (node.type === "Literal" && typeof node.value === "string")
-      ) {
-        const raw = node.name || node.value;
-        const parts =
-          typeof raw === "string"
-            ? splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w))
-            : [];
-
-        for (const part of parts) {
-          const lower = part.toLowerCase();
-
-          if (!lower || lower.length <= 2 || /^[A-Z]+$/.test(part)) continue;
-          if (projectDict.has(lower)) continue;
-
-          if (!spell.correct(lower)) {
-            const suggestions = spell.suggest(lower);
-            typos.push({
-              file,
-              line: node.loc.start.line,
-              word: part,
-              suggestions,
-            });
-          }
-        }
-      }
-    });
-  } catch (err: any) {
-    console.error(chalk.red(`Parsing error in ${file}: ${err.message}`));
+  const ast = parseCode(code);
+  if (!ast) {
+    console.error(chalk.red(`Parsing error in ${file}`));
+    return [];
   }
 
+  const typos: TypoEntry[] = [];
+  walkAST(ast, (node) => {
+    if (
+      node.type === "Identifier" ||
+      (node.type === "Literal" && typeof node.value === "string")
+    ) {
+      const raw = node.name ?? node.value;
+      if (typeof raw !== "string") return;
+
+      for (const part of splitCompound(raw).filter((w) =>
+        /^[a-zA-Z]+$/.test(w)
+      )) {
+        const lower = part.toLowerCase();
+        if (!isValidWord(part, projectDict, spell)) continue;
+        if (!spell.correct(lower)) {
+          typos.push({
+            file,
+            line: node.loc.start.line,
+            word: part,
+            suggestions: spell.suggest(lower),
+          });
+        }
+      }
+    }
+  });
+
   return typos;
+};
+
+const readFileSyncSafe = (file: string): string => {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+};
+
+const buildProjectDictionary = (
+  files: string[],
+  spell: nspell
+): ProjectDictionary => {
+  const dict: ProjectDictionary = new Set();
+
+  for (const file of files) {
+    const code = readFileSyncSafe(file);
+    for (const word of extractWordsFromCode(code)) {
+      const lower = word.toLowerCase();
+      if (
+        lower.length > 2 &&
+        /^[a-zA-Z]+$/.test(lower) &&
+        spell.correct(lower)
+      ) {
+        dict.add(lower);
+      }
+    }
+  }
+
+  return dict;
+};
+
+const displayTypos = (typos: TypoEntry[]) => {
+  const table = new Table({
+    head: ["File", "Line", "Word", "Suggestions"],
+    colWidths: [40, 10, 20, 40],
+  });
+
+  typos.forEach(({ file, line, word, suggestions }) =>
+    table.push([file, line, word, suggestions.join(", ")])
+  );
+
+  console.log(chalk.yellow("⚠️  Typos found:\n"));
+  console.log(table.toString());
+  console.log(chalk.redBright(`\n❌ Total typos: ${typos.length}\n`));
+};
+
+const displaySuccess = (fileCount: number) => {
+  const table = new Table({
+    head: [chalk.green("✅ Typo Check Passed")],
+  });
+  table.push(["Checked Files: " + fileCount]);
+  table.push(["Total Typos: 0"]);
+  table.push(["Accuracy: 100%"]);
+  console.log(table.toString());
 };
 
 const runChecker = async (rootDir: string): Promise<void> => {
@@ -147,58 +195,20 @@ const runChecker = async (rootDir: string): Promise<void> => {
     )
   );
 
-  const projectDict: ProjectDictionary = new Set();
-
-  for (const file of files) {
-    const code = fs.readFileSync(file, "utf8");
-    const words = extractWordsFromCode(code);
-    for (const word of words) {
-      const cleaned = word.toLowerCase();
-      if (cleaned && /^[a-zA-Z]+$/.test(cleaned)) {
-        projectDict.add(cleaned);
-      }
-    }
-  }
-
   const spell = await loadNspell();
+  const projectDict = buildProjectDictionary(files, spell);
 
-  const allTypos: TypoEntry[] = [];
-
-  for (const file of files) {
-    const code = fs.readFileSync(file, "utf8");
-    const typos = extractTyposFromCode(
-      code,
+  const typos: TypoEntry[] = files.flatMap((file) =>
+    extractTyposFromCode(
+      readFileSyncSafe(file),
       spell,
       projectDict,
       path.relative(rootDir, file)
-    );
-    allTypos.push(...typos);
-  }
+    )
+  );
 
-  if (allTypos.length > 0) {
-    const typoTable = new table({
-      head: ["File", "Line", "Word", "Suggestions"],
-      colWidths: [40, 10, 20, 40],
-    });
-
-    for (const { file, line, word, suggestions } of allTypos) {
-      typoTable.push([file, line, word, suggestions.join(", ")]);
-    }
-
-    console.log(chalk.yellow("⚠️  Typos found:\n"));
-    console.log(typoTable.toString());
-    console.log(chalk.redBright(`\n❌ Total typos: ${allTypos.length}\n`));
-  } else {
-    const successTable = new table({
-      head: [chalk.green("✅ Typo Check Passed")],
-    });
-
-    successTable.push(["Checked Files: " + files.length]);
-    successTable.push(["Total Typos: 0"]);
-    successTable.push(["Accuracy: 100%"]);
-
-    console.log(successTable.toString());
-  }
+  typos.length ? displayTypos(typos) : displaySuccess(files.length);
 };
 
 export default runChecker;
+
