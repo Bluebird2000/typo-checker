@@ -10,5 +10,5 @@
       "outDir": "./dist",
     "strict": true
   },
-  "include": ["lib, bin"]
+  "include": ["lib", "bin"]
 }
