@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
   checker_default
-} from "../chunk-LK2XYD73.js";
+} from "../chunk-QEKAYXHQ.js";
 
 // bin/index.ts
 var projectRoot = process.cwd();

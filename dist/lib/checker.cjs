@@ -118,7 +118,15 @@ var predefinedWhitelist = /* @__PURE__ */ new Set([
   "colours",
   "naira",
   "enquiry",
-  "telco"
+  "telco",
+  "otp",
+  "rgba",
+  "dayjs",
+  "glo",
+  "mtn",
+  "airtel",
+  "etisalat",
+  "9mobile"
 ]);
 var dynamicWhitelist = /* @__PURE__ */ new Set();
 var loadConfig = (rootDir) => {
@@ -196,6 +204,9 @@ var isValidWord = (word, projectDict, spell) => {
   const suggestions = spell.suggest(lower);
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
+    return false;
+  }
+  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
     return false;
   }
   return true;
@@ -295,7 +306,15 @@ var shouldIgnoreFile = (filePath, rootDir) => {
     "metro.config.js",
     "metro.config.ts",
     "styles.ts",
-    "styles.js"
+    "styles.js",
+    "config.js",
+    "config.ts",
+    "store.ts",
+    "store.js",
+    "colours.ts",
+    "colours.js",
+    "theme.ts",
+    "theme.js"
   ]);
   const baseName = import_path.default.basename(relPath).toLowerCase();
   if (ignoredFiles.has(baseName)) {

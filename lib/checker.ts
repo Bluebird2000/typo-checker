@@ -79,6 +79,14 @@ const predefinedWhitelist = new Set<string>([
   "naira",
   "enquiry",
   "telco",
+  "otp",
+  "rgba",
+  "dayjs",
+  "glo",
+  "mtn",
+  "airtel",
+  "etisalat",
+  "9mobile",
 ]);
 
 let dynamicWhitelist = new Set<string>();
@@ -166,6 +174,31 @@ const loadNspell = async (): Promise<nspell> => {
   return nspell(aff, dic);
 };
 
+// const isValidWord = (
+//   word: string,
+//   projectDict: ProjectDictionary,
+//   spell: nspell
+// ): boolean => {
+//   const lower = word.toLowerCase();
+//   if (
+//     lower.length <= 2 ||
+//     /^[A-Z]+$/.test(word) || // Acronyms
+//     projectDict.has(lower) ||
+//     dynamicWhitelist.has(lower)
+//   ) {
+//     return false;
+//   }
+
+//   // If the word is already correct or suggestion contains itself, ignore
+//   const suggestions = spell.suggest(lower);
+//   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+//   if (spell.correct(lower) || suggestionSet.has(lower)) {
+//     return false;
+//   }
+
+//   return true;
+// };
+
 const isValidWord = (
   word: string,
   projectDict: ProjectDictionary,
@@ -181,15 +214,21 @@ const isValidWord = (
     return false;
   }
 
-  // If the word is already correct or suggestion contains itself, ignore
   const suggestions = spell.suggest(lower);
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+
   if (spell.correct(lower) || suggestionSet.has(lower)) {
+    return false;
+  }
+
+  // Skip UK/US spelling variants
+  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
     return false;
   }
 
   return true;
 };
+
 
 /**
  * Check if all suggestions + original word are valid spellings
@@ -328,6 +367,14 @@ const shouldIgnoreFile = (filePath: string, rootDir: string): boolean => {
     "metro.config.ts",
     "styles.ts",
     "styles.js",
+    "config.js",
+    "config.ts",
+    "store.ts",
+    "store.js",
+    "colours.ts",
+    "colours.js",
+    "theme.ts",
+    "theme.js",
   ]);
   const baseName = path.basename(relPath).toLowerCase();
   if (ignoredFiles.has(baseName)) {
