@@ -20,7 +20,12 @@
     "typo-checker": "node dist/index.js"
   },
   "typoChecker": {
-    "whitelist": ["quickteller", "gmail", "biller", "Quicktag", "Billers"]
+    "whitelist": [
+      "exampleVariable",
+      "anotherExample",
+      "myFunction",
+      "someConstant"
+    ]
   },
   "repository": {
     "type": "git",

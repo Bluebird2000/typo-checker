@@ -59,7 +59,7 @@ const predefinedWhitelist = new Set<string>([
   "estree",
   "http",
   "www",
-  "utf",
+  "utf"
 ]);
 
 let dynamicWhitelist = new Set<string>();
@@ -144,39 +144,6 @@ const loadNspell = async (): Promise<nspell> => {
   return nspell(dict);
 };
 
-/**
- * Checks if two words differ only by common US/UK spelling variants.
- */
-const isUsUkVariant = (word1: string, word2: string): boolean => {
-  if (word1 === word2) return false;
-
-  const w1 = word1.toLowerCase();
-  const w2 = word2.toLowerCase();
-
-  const variants: [RegExp, RegExp][] = [
-    [/(.)our$/, /(.)or$/], // colour/color
-    [/(.)ise$/, /(.)ize$/], // organise/organize
-    [/(.)yse$/, /(.)yze$/], // analyse/analyze
-    [/(.)re$/, /(.)er$/], // centre/center
-    [/(.)ll$/, /(.)l$/], // travelling/traveling
-    [/(.)ogue$/, /(.)og$/], // catalogue/catalog
-    [/(.)ce$/, /(.)se$/], // defence/defense
-    [/(.)ence$/, /(.)ense$/],
-    [/(.)vouri$/, /(.)vori$/], // favourite/favorite
-  ];
-
-  for (const [uk, us] of variants) {
-    if ((uk.test(w1) && us.test(w2)) || (us.test(w1) && uk.test(w2))) {
-      // Remove endings and compare stems
-      const stemW1 = w1.replace(uk, "$1");
-      const stemW2 = w2.replace(us, "$1");
-      if (stemW1 === stemW2) return true;
-    }
-  }
-
-  return false;
-};
-
 const isValidWord = (
   word: string,
   projectDict: ProjectDictionary,
@@ -192,14 +159,30 @@ const isValidWord = (
     return false;
   }
 
-  // If the word is valid and suggestions contain itself, ignore
+  // If the word is already correct or suggestion contains itself, ignore
   const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  const suggestionSet = new Set(suggestions.map(s => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
   }
 
   return true;
+};
+
+/**
+ * Check if all suggestions + original word are valid spellings
+ * (indicating US/UK spelling variants)
+ */
+const areAllSuggestionsVariants = (word: string, suggestions: string[], spell: nspell): boolean => {
+  const variants = new Set(suggestions.map(s => s.toLowerCase()));
+  variants.add(word.toLowerCase());
+
+  for (const variant of variants) {
+    if (!spell.correct(variant)) {
+      return false; // At least one variant not recognized as correct
+    }
+  }
+  return true; // All recognized => likely spelling variants
 };
 
 const extractTyposFromCode = (
@@ -226,15 +209,16 @@ const extractTyposFromCode = (
         const lower = part.toLowerCase();
 
         if (isValidWord(part, projectDict, spell)) {
-          // Get suggestions excluding exact match
-          let suggestions = spell
-            .suggest(lower)
-            .filter((s) => s.toLowerCase() !== lower);
-
-          // Filter out suggestions that are only US/UK variants of the word itself
-          suggestions = suggestions.filter(
-            (s) => !isUsUkVariant(lower, s.toLowerCase())
+          // Get suggestions excluding the word itself
+          const suggestions = spell.suggest(lower).filter(
+            (s) => s.toLowerCase() !== lower
           );
+
+          // Skip if all suggestions + word are valid spellings (US/UK variants)
+          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
+            // This is just a US/UK variant difference - skip listing
+            continue;
+          }
 
           if (suggestions.length > 0) {
             typos.push({

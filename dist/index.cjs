@@ -157,38 +157,6 @@ var loadNspell = () => __async(null, null, function* () {
   const dict = yield import_dictionary_en.default;
   return (0, import_nspell.default)(dict);
 });
-var isUsUkVariant = (word1, word2) => {
-  if (word1 === word2) return false;
-  const w1 = word1.toLowerCase();
-  const w2 = word2.toLowerCase();
-  const variants = [
-    [/(.)our$/, /(.)or$/],
-    // colour/color
-    [/(.)ise$/, /(.)ize$/],
-    // organise/organize
-    [/(.)yse$/, /(.)yze$/],
-    // analyse/analyze
-    [/(.)re$/, /(.)er$/],
-    // centre/center
-    [/(.)ll$/, /(.)l$/],
-    // travelling/traveling
-    [/(.)ogue$/, /(.)og$/],
-    // catalogue/catalog
-    [/(.)ce$/, /(.)se$/],
-    // defence/defense
-    [/(.)ence$/, /(.)ense$/],
-    [/(.)vouri$/, /(.)vori$/]
-    // favourite/favorite
-  ];
-  for (const [uk, us] of variants) {
-    if (uk.test(w1) && us.test(w2) || us.test(w1) && uk.test(w2)) {
-      const stemW1 = w1.replace(uk, "$1");
-      const stemW2 = w2.replace(us, "$1");
-      if (stemW1 === stemW2) return true;
-    }
-  }
-  return false;
-};
 var isValidWord = (word, projectDict, spell) => {
   const lower = word.toLowerCase();
   if (lower.length <= 2 || /^[A-Z]+$/.test(word) || // Acronyms
@@ -199,6 +167,16 @@ var isValidWord = (word, projectDict, spell) => {
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
+  }
+  return true;
+};
+var areAllSuggestionsVariants = (word, suggestions, spell) => {
+  const variants = new Set(suggestions.map((s) => s.toLowerCase()));
+  variants.add(word.toLowerCase());
+  for (const variant of variants) {
+    if (!spell.correct(variant)) {
+      return false;
+    }
   }
   return true;
 };
@@ -218,10 +196,12 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
       )) {
         const lower = part.toLowerCase();
         if (isValidWord(part, projectDict, spell)) {
-          let suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
-          suggestions = suggestions.filter(
-            (s) => !isUsUkVariant(lower, s.toLowerCase())
+          const suggestions = spell.suggest(lower).filter(
+            (s) => s.toLowerCase() !== lower
           );
+          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
+            continue;
+          }
           if (suggestions.length > 0) {
             typos.push({
               file,
