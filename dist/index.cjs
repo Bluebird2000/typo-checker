@@ -61,18 +61,66 @@ try {
 } catch (e) {
   __dirname = import_path.default.resolve();
 }
-var splitCompound = (word) => (
-  // Only split on underscores, spaces or non-letter chars, NOT on uppercase letters inside words
-  word.split(/[_\s]+|[^a-zA-Z]+/).filter(Boolean)
-);
-var isValidWord = (word, projectDict, spell) => {
-  if (word.length <= 2) return false;
-  if (/^[A-Z]{2,}$/.test(word)) return false;
-  const lower = word.toLowerCase();
-  if (projectDict.has(lower)) return false;
-  if (spell.correct(lower)) return false;
-  return true;
+var predefinedWhitelist = /* @__PURE__ */ new Set([
+  "eslint",
+  "typescript",
+  "nodejs",
+  "cli",
+  "nspell",
+  "jsx",
+  "tsx",
+  "api",
+  "json",
+  "http",
+  "https",
+  "uuid",
+  "npm",
+  "jsx",
+  "ts",
+  "html",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "url",
+  "js",
+  "tsconfig",
+  "config",
+  "cli",
+  "estree",
+  "http",
+  "www",
+  "utf"
+]);
+var dynamicWhitelist = /* @__PURE__ */ new Set();
+var loadConfig = (rootDir) => {
+  const configPath = import_path.default.join(rootDir, "typo-checker.config.json");
+  const packageJsonPath = import_path.default.join(rootDir, "package.json");
+  let config = {};
+  if (import_fs.default.existsSync(configPath)) {
+    try {
+      config = JSON.parse(import_fs.default.readFileSync(configPath, "utf8"));
+    } catch (err) {
+      console.error(import_chalk.default.red("Error parsing typo-checker.config.json"), err);
+    }
+  } else if (import_fs.default.existsSync(packageJsonPath)) {
+    try {
+      const pkg = JSON.parse(import_fs.default.readFileSync(packageJsonPath, "utf8"));
+      if (pkg.typoChecker) {
+        config = pkg.typoChecker;
+      }
+    } catch (err) {
+      console.error(import_chalk.default.red("Error parsing package.json"), err);
+    }
+  }
+  dynamicWhitelist = new Set(
+    [
+      ...predefinedWhitelist,
+      ...Array.isArray(config.whitelist) ? config.whitelist.map((w) => w.toLowerCase()) : []
+    ].map((w) => w.toLowerCase())
+  );
 };
+var splitCompound = (word) => word.split(/[_\s]+/).flatMap((seg) => seg.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
 var walkAST = (node, cb) => {
   if (!node || typeof node !== "object") return;
   cb(node);
@@ -93,9 +141,6 @@ var parseCode = (code) => {
   }
 };
 var extractWordsFromNode = (node) => {
-  if (node.type === "Identifier") {
-    return splitCompound(node.name);
-  }
   if (node.type === "Literal" && typeof node.value === "string") {
     return node.value.split(/[^a-zA-Z]+/).filter(Boolean);
   }
@@ -112,6 +157,51 @@ var loadNspell = () => __async(null, null, function* () {
   const dict = yield import_dictionary_en.default;
   return (0, import_nspell.default)(dict);
 });
+var isUsUkVariant = (word1, word2) => {
+  if (word1 === word2) return false;
+  const w1 = word1.toLowerCase();
+  const w2 = word2.toLowerCase();
+  const variants = [
+    [/(.)our$/, /(.)or$/],
+    // colour/color
+    [/(.)ise$/, /(.)ize$/],
+    // organise/organize
+    [/(.)yse$/, /(.)yze$/],
+    // analyse/analyze
+    [/(.)re$/, /(.)er$/],
+    // centre/center
+    [/(.)ll$/, /(.)l$/],
+    // travelling/traveling
+    [/(.)ogue$/, /(.)og$/],
+    // catalogue/catalog
+    [/(.)ce$/, /(.)se$/],
+    // defence/defense
+    [/(.)ence$/, /(.)ense$/],
+    [/(.)vouri$/, /(.)vori$/]
+    // favourite/favorite
+  ];
+  for (const [uk, us] of variants) {
+    if (uk.test(w1) && us.test(w2) || us.test(w1) && uk.test(w2)) {
+      const stemW1 = w1.replace(uk, "$1");
+      const stemW2 = w2.replace(us, "$1");
+      if (stemW1 === stemW2) return true;
+    }
+  }
+  return false;
+};
+var isValidWord = (word, projectDict, spell) => {
+  const lower = word.toLowerCase();
+  if (lower.length <= 2 || /^[A-Z]+$/.test(word) || // Acronyms
+  projectDict.has(lower) || dynamicWhitelist.has(lower)) {
+    return false;
+  }
+  const suggestions = spell.suggest(lower);
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  if (spell.correct(lower) || suggestionSet.has(lower)) {
+    return false;
+  }
+  return true;
+};
 var extractTyposFromCode = (code, spell, projectDict, file) => {
   const ast = parseCode(code);
   if (!ast) {
@@ -120,21 +210,27 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
   }
   const typos = [];
   walkAST(ast, (node) => {
-    var _a;
-    if (node.type === "Identifier" || node.type === "Literal" && typeof node.value === "string") {
-      const raw = (_a = node.name) != null ? _a : node.value;
+    if (node.type === "Literal" && typeof node.value === "string") {
+      const raw = node.value;
       if (typeof raw !== "string") return;
-      for (const part of splitCompound(raw)) {
-        if (!/^[a-zA-Z]+$/.test(part)) continue;
-        if (!isValidWord(part, projectDict, spell)) continue;
+      for (const part of splitCompound(raw).filter(
+        (w) => /^[a-zA-Z]+$/.test(w)
+      )) {
         const lower = part.toLowerCase();
-        const suggestions = spell.suggest(lower);
-        typos.push({
-          file,
-          line: node.loc.start.line,
-          word: part,
-          suggestions
-        });
+        if (isValidWord(part, projectDict, spell)) {
+          let suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
+          suggestions = suggestions.filter(
+            (s) => !isUsUkVariant(lower, s.toLowerCase())
+          );
+          if (suggestions.length > 0) {
+            typos.push({
+              file,
+              line: node.loc.start.line,
+              word: part,
+              suggestions
+            });
+          }
+        }
       }
     }
   });
@@ -152,10 +248,8 @@ var buildProjectDictionary = (files, spell) => {
   for (const file of files) {
     const code = readFileSyncSafe(file);
     for (const word of extractWordsFromCode(code)) {
-      if (!/^[a-zA-Z]+$/.test(word)) continue;
-      if (word.length <= 2) continue;
       const lower = word.toLowerCase();
-      if (spell.correct(lower)) {
+      if (lower.length > 2 && /^[a-zA-Z]+$/.test(lower) && spell.correct(lower)) {
         dict.add(lower);
       }
     }
@@ -170,7 +264,7 @@ var displayTypos = (typos) => {
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(import_chalk.default.yellow("\u26A0\uFE0F  Typos found:\n"));
+  console.log(import_chalk.default.yellow("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
   console.log(import_chalk.default.redBright(`
 \u274C Total typos: ${typos.length}
@@ -186,6 +280,7 @@ var displaySuccess = (fileCount) => {
   console.log(table.toString());
 };
 var runChecker = (rootDir) => __async(null, null, function* () {
+  loadConfig(rootDir);
   const files = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,

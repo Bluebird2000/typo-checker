@@ -19,6 +19,9 @@
     "prepublishOnly": "npm run build",
     "typo-checker": "node dist/index.js"
   },
+  "typoChecker": {
+    "whitelist": ["quickteller", "gmail", "biller", "Quicktag", "Billers"]
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Bluebird2000/@bluebird-helpers.git"
