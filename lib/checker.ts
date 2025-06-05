@@ -7,6 +7,7 @@ import Table from "cli-table3";
 import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
 import { parse } from "@typescript-eslint/typescript-estree";
+import { placeNames } from "./place-names";
 
 let __dirname: string;
 try {
@@ -59,7 +60,8 @@ const predefinedWhitelist = new Set<string>([
   "estree",
   "http",
   "www",
-  "utf"
+  "utf",
+  ...Array.from(placeNames).map((name) => name.toLowerCase()),
 ]);
 
 let dynamicWhitelist = new Set<string>();
@@ -164,7 +166,7 @@ const isValidWord = (
 
   // If the word is already correct or suggestion contains itself, ignore
   const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map(s => s.toLowerCase()));
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
   if (spell.correct(lower) || suggestionSet.has(lower)) {
     return false;
   }
@@ -176,8 +178,12 @@ const isValidWord = (
  * Check if all suggestions + original word are valid spellings
  * (indicating US/UK spelling variants)
  */
-const areAllSuggestionsVariants = (word: string, suggestions: string[], spell: nspell): boolean => {
-  const variants = new Set(suggestions.map(s => s.toLowerCase()));
+const areAllSuggestionsVariants = (
+  word: string,
+  suggestions: string[],
+  spell: nspell
+): boolean => {
+  const variants = new Set(suggestions.map((s) => s.toLowerCase()));
   variants.add(word.toLowerCase());
 
   for (const variant of variants) {
@@ -213,12 +219,15 @@ const extractTyposFromCode = (
 
         if (isValidWord(part, projectDict, spell)) {
           // Get suggestions excluding the word itself
-          const suggestions = spell.suggest(lower).filter(
-            (s) => s.toLowerCase() !== lower
-          );
+          const suggestions = spell
+            .suggest(lower)
+            .filter((s) => s.toLowerCase() !== lower);
 
           // Skip if all suggestions + word are valid spellings (US/UK variants)
-          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
+          if (
+            suggestions.length > 0 &&
+            areAllSuggestionsVariants(part, suggestions, spell)
+          ) {
             // This is just a US/UK variant difference - skip listing
             continue;
           }
