@@ -155,6 +155,12 @@ const isValidWord = (
   spell: nspell
 ): boolean => {
   const lower = word.toLowerCase();
+
+  // Ignore hex color codes
+  if (/^#[0-9a-f]{3,6}$/i.test(word)) {
+    return false;
+  }
+
   if (
     lower.length <= 2 ||
     /^[A-Z]+$/.test(word) || // Acronyms
@@ -221,7 +227,7 @@ const extractTyposFromCode = (
           // Get suggestions excluding the word itself
           const suggestions = spell
             .suggest(lower)
-            .filter((s) => s.toLowerCase() !== lower);
+            .filter((s: string) => s.toLowerCase() !== lower);
 
           // Skip if all suggestions + word are valid spellings (US/UK variants)
           if (
