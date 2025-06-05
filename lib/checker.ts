@@ -29,66 +29,6 @@ interface TypoCheckerConfig {
   whitelist?: string[];
 }
 
-// Predefined whitelist (all lowercase for consistency)
-const predefinedWhitelist = new Set<string>([
-  "eslint",
-  "typescript",
-  "nodejs",
-  "cli",
-  "nspell",
-  "jsx",
-  "tsx",
-  "api",
-  "json",
-  "http",
-  "https",
-  "uuid",
-  "npm",
-  "jsx",
-  "ts",
-  "html",
-  "css",
-  "scss",
-  "sass",
-  "less",
-  "url",
-  "js",
-  "tsconfig",
-  "config",
-  "cli",
-  "estree",
-  "http",
-  "www",
-  "utf",
-  "skia",
-  "utils",
-  "shopify",
-  "react",
-  "redux",
-  "reactjs",
-  "tanstack",
-  "src",
-  "react-query",
-  "png",
-  "jpg",
-  "svg",
-  "util",
-  "redux",
-  "debounce",
-  "colours",
-  "naira",
-  "enquiry",
-  "telco",
-  "otp",
-  "rgba",
-  "dayjs",
-  "glo",
-  "mtn",
-  "airtel",
-  "etisalat",
-  "9mobile",
-]);
-
 let dynamicWhitelist = new Set<string>();
 
 const loadConfig = (rootDir: string): void => {
@@ -116,7 +56,6 @@ const loadConfig = (rootDir: string): void => {
 
   dynamicWhitelist = new Set(
     [
-      ...predefinedWhitelist,
       ...(Array.isArray(config.whitelist)
         ? config.whitelist.map((w) => w.toLowerCase())
         : []),
@@ -129,15 +68,71 @@ const splitCompound = (word: string): string[] =>
     .split(/[_\s]+/)
     .flatMap((seg) => seg.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
 
-const walkAST = (node: unknown, cb: (node: any) => void): void => {
+const isLikelyCodeOrReserved = (word: string): boolean => {
+  if (!word) return false;
+
+  // Lowercase for checks
+  const lower = word.toLowerCase();
+
+  // 1. Detect URLs or URL parts (http, https, www, domain extensions, slashes, colons, query params)
+  // We'll treat anything containing :// or starting with www. or having a known TLD as code
+  const urlLike = /^(https?:\/\/|www\.)|(\.[a-z]{2,6})(\/|$)/i;
+  if (urlLike.test(word)) return true;
+
+  // 2. Detect acronyms or ALL CAPS (at least 2 letters all uppercase)
+  if (/^[A-Z]{2,}$/.test(word)) return true;
+
+  // 3. Detect mixed-case identifiers (camelCase, PascalCase)
+  // If word contains uppercase letters inside (not only first letter), treat as code
+  if (/[a-z]+[A-Z]+/.test(word) || /[A-Z]+[a-z]+/.test(word)) {
+    return true;
+  }
+
+  // 4. Detect words that look like function calls (ending with parentheses)
+  if (/^[a-zA-Z0-9_$]+\(\)$/.test(word)) return true;
+
+  // 5. Detect file extensions or known tech keywords common in code (without hardcoded whitelist)
+  // Heuristic: words ending with typical extensions (js, ts, jsx, tsx, json, html, css, scss, less, png, jpg, svg)
+  if (
+    /\.(js|ts|jsx|tsx|json|html|css|scss|sass|less|png|jpg|svg|gif|md|yml|yaml|lock)$/.test(
+      lower
+    )
+  )
+    return true;
+
+  // 6. Detect typical programming or config words commonly used (heuristic, e.g., api, npm, cli, uuid, etc)
+  // We do this by pattern: if word length <= 5 and all lowercase, treat as reserved (common acronyms)
+  if (/^[a-z]{2,5}$/.test(lower)) return true;
+
+  // 7. Detect words with digits inside (version numbers, code identifiers)
+  if (/\d/.test(word)) return true;
+
+  // 8. Words starting or ending with underscores or dashes likely code tokens
+  if (/^[_\-]+|[_\-]+$/.test(word)) return true;
+
+  // Default: treat as normal English word (check spelling)
+  return false;
+};
+
+const walkAST = (
+  node: any,
+  cb: (node: any) => void,
+  parent: any = null
+): void => {
   if (!node || typeof node !== "object") return;
+  node.parent = parent; // set parent manually
+
   cb(node);
+
   for (const key in node) {
-    const child = (node as any)[key];
+    if (key === "parent") continue;
+    const child = node[key];
     if (Array.isArray(child)) {
-      child.forEach((c) => c?.type && walkAST(c, cb));
+      child.forEach((c) => {
+        if (c?.type) walkAST(c, cb, node);
+      });
     } else if (child?.type) {
-      walkAST(child, cb);
+      walkAST(child, cb, node);
     }
   }
 };
@@ -174,31 +169,6 @@ const loadNspell = async (): Promise<nspell> => {
   return nspell(aff, dic);
 };
 
-// const isValidWord = (
-//   word: string,
-//   projectDict: ProjectDictionary,
-//   spell: nspell
-// ): boolean => {
-//   const lower = word.toLowerCase();
-//   if (
-//     lower.length <= 2 ||
-//     /^[A-Z]+$/.test(word) || // Acronyms
-//     projectDict.has(lower) ||
-//     dynamicWhitelist.has(lower)
-//   ) {
-//     return false;
-//   }
-
-//   // If the word is already correct or suggestion contains itself, ignore
-//   const suggestions = spell.suggest(lower);
-//   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
-//   if (spell.correct(lower) || suggestionSet.has(lower)) {
-//     return false;
-//   }
-
-//   return true;
-// };
-
 const isValidWord = (
   word: string,
   projectDict: ProjectDictionary,
@@ -213,6 +183,8 @@ const isValidWord = (
   ) {
     return false;
   }
+    // Skip if looks like code/reserved identifier inside string
+  if (isLikelyCodeOrReserved(word)) return false;
 
   const suggestions = spell.suggest(lower);
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
@@ -222,13 +194,15 @@ const isValidWord = (
   }
 
   // Skip UK/US spelling variants
-  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
+  if (
+    suggestions.length > 0 &&
+    areAllSuggestionsVariants(word, suggestions, spell)
+  ) {
     return false;
   }
 
   return true;
 };
-
 
 /**
  * Check if all suggestions + original word are valid spellings
@@ -264,31 +238,24 @@ const extractTyposFromCode = (
 
   const typos: TypoEntry[] = [];
   walkAST(ast, (node) => {
-    if (node.type === "Literal" && typeof node.value === "string") {
+    if (
+      node.type === "Literal" &&
+      typeof node.value === "string" &&
+      shouldCheckLiteral(node)
+    ) {
       const raw = node.value;
-      if (typeof raw !== "string") return;
-
       for (const part of splitCompound(raw).filter((w) =>
         /^[a-zA-Z]+$/.test(w)
       )) {
-        const lower = part.toLowerCase();
-
         if (isValidWord(part, projectDict, spell)) {
-          // Get suggestions excluding the word itself
           const suggestions = spell
-            .suggest(lower)
-            .filter((s) => s.toLowerCase() !== lower);
+            .suggest(part.toLowerCase())
+            .filter((s) => s.toLowerCase() !== part.toLowerCase());
 
-          // Skip if all suggestions + word are valid spellings (US/UK variants)
           if (
             suggestions.length > 0 &&
-            areAllSuggestionsVariants(part, suggestions, spell)
+            !areAllSuggestionsVariants(part, suggestions, spell)
           ) {
-            // This is just a US/UK variant difference - skip listing
-            return;
-          }
-
-          if (suggestions.length > 0) {
             typos.push({
               file,
               line: node.loc.start.line,
@@ -302,6 +269,39 @@ const extractTyposFromCode = (
   });
 
   return typos;
+};
+
+const shouldCheckLiteral = (node: any): boolean => {
+  const parent = node.parent;
+  if (!parent) return true;
+
+  if (
+    parent.type === "Property" &&
+    parent.key === node &&
+    !parent.computed // it's just a key, skip
+  ) {
+    return false;
+  }
+
+  if (
+    [
+      "ImportDeclaration",
+      "ExportNamedDeclaration",
+      "ExportAllDeclaration",
+    ].includes(parent.type)
+  ) {
+    return false;
+  }
+
+  if (
+    parent.type === "CallExpression" &&
+    parent.callee &&
+    ["require", "import"].includes(parent.callee.name)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const readFileSyncSafe = (file: string): string => {
@@ -322,7 +322,11 @@ const buildProjectDictionary = (
     const code = readFileSyncSafe(file);
     for (const word of extractWordsFromCode(code)) {
       const lower = word.toLowerCase();
-      if (lower.length > 2 && /^[a-zA-Z]+$/.test(lower) && spell.correct(lower)) {
+      if (
+        lower.length > 2 &&
+        /^[a-zA-Z]+$/.test(lower) &&
+        spell.correct(lower)
+      ) {
         dict.add(lower);
       }
     }
@@ -359,30 +363,6 @@ const displaySuccess = (fileCount: number) => {
 const shouldIgnoreFile = (filePath: string, rootDir: string): boolean => {
   const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/"); // normalize slashes
 
-  // Ignore files by exact name
-  const ignoredFiles = new Set([
-    "babel.config.js",
-    "babel.config.ts",
-    "metro.config.js",
-    "metro.config.ts",
-    "styles.ts",
-    "styles.js",
-    "config.js",
-    "config.ts",
-    "store.ts",
-    "store.js",
-    "colours.ts",
-    "colours.js",
-    "theme.ts",
-    "theme.js",
-  ]);
-  const baseName = path.basename(relPath).toLowerCase();
-  if (ignoredFiles.has(baseName)) {
-    return true;
-  }
-
-  // Ignore folders with "asset" or "assets" anywhere in path
-  // Also ignore "assets/svgs" or "assets/svg" folders
   const pathParts = relPath.toLowerCase().split("/");
   if (pathParts.some((part) => part.includes("asset"))) {
     return true;
