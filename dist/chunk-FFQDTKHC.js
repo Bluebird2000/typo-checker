@@ -29,7 +29,10 @@ import Table from "cli-table3";
 import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
 import { parse } from "@typescript-eslint/typescript-estree";
+import natural from "natural";
 var import_meta = {};
+var wordnet = new natural.WordNet();
+var nounInflector = new natural.NounInflector();
 var __dirname;
 try {
   const __filename = fileURLToPath(import_meta.url);
@@ -126,23 +129,39 @@ var loadNspell = () => __async(null, null, function* () {
   const dic = Buffer.from(dict.dic);
   return nspell(aff, dic);
 });
-var isValidWord = (word, projectDict, spell) => {
+var isWordInWordNet = (word) => {
+  return new Promise((resolve) => {
+    wordnet.lookup(word, (results) => {
+      resolve(results.length > 0);
+    });
+  });
+};
+var isValidWord = (word, projectDict, spell) => __async(null, null, function* () {
   const lower = word.toLowerCase();
   if (lower.length <= 2 || /^[A-Z]+$/.test(word) || // Acronyms
   projectDict.has(lower) || dynamicWhitelist.has(lower)) {
     return false;
   }
   if (isLikelyCodeOrReserved(word)) return false;
-  const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
-  if (spell.correct(lower) || suggestionSet.has(lower)) {
+  if (spell.correct(lower)) return false;
+  const singular = nounInflector.singularize(lower);
+  const plural = nounInflector.pluralize(lower);
+  const [isBaseValid, isSingularValid, isPluralValid] = yield Promise.all([
+    isWordInWordNet(lower),
+    singular !== lower ? isWordInWordNet(singular) : Promise.resolve(false),
+    plural !== lower ? isWordInWordNet(plural) : Promise.resolve(false)
+  ]);
+  if (isBaseValid || isSingularValid || isPluralValid) {
     return false;
   }
+  const suggestions = spell.suggest(lower);
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  if (suggestionSet.has(lower)) return false;
   if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
     return false;
   }
   return true;
-};
+});
 var areAllSuggestionsVariants = (word, suggestions, spell) => {
   const variants = new Set(suggestions.map((s) => s.toLowerCase()));
   variants.add(word.toLowerCase());
@@ -153,35 +172,39 @@ var areAllSuggestionsVariants = (word, suggestions, spell) => {
   }
   return true;
 };
-var extractTyposFromCode = (code, spell, projectDict, file) => {
+var extractTyposFromCode = (code, spell, projectDict, file) => __async(null, null, function* () {
   const ast = parseCode(code);
   if (!ast) {
     console.error(chalk.red(`Parsing error in ${file}`));
     return [];
   }
   const typos = [];
+  const promises = [];
   walkAST(ast, (node) => {
     if (node.type === "Literal" && typeof node.value === "string" && shouldCheckLiteral(node)) {
       const raw = node.value;
-      for (const part of splitCompound(raw).filter(
-        (w) => /^[a-zA-Z]+$/.test(w)
-      )) {
-        if (isValidWord(part, projectDict, spell)) {
-          const suggestions = spell.suggest(part.toLowerCase()).filter((s) => s.toLowerCase() !== part.toLowerCase());
-          if (suggestions.length > 0 && !areAllSuggestionsVariants(part, suggestions, spell)) {
-            typos.push({
-              file,
-              line: node.loc.start.line,
-              word: part,
-              suggestions
-            });
+      const parts = splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w));
+      parts.forEach((part) => {
+        const check = () => __async(null, null, function* () {
+          if (yield isValidWord(part, projectDict, spell)) {
+            const suggestions = spell.suggest(part.toLowerCase()).filter((s) => s.toLowerCase() !== part.toLowerCase());
+            if (suggestions.length > 0 && !areAllSuggestionsVariants(part, suggestions, spell)) {
+              typos.push({
+                file,
+                line: node.loc.start.line,
+                word: part,
+                suggestions
+              });
+            }
           }
-        }
-      }
+        });
+        promises.push(check());
+      });
     }
   });
+  yield Promise.all(promises);
   return typos;
-};
+});
 var shouldCheckLiteral = (node) => {
   const parent = node.parent;
   if (!parent) return true;
@@ -245,6 +268,16 @@ var displaySuccess = (fileCount) => {
 };
 var shouldIgnoreFile = (filePath, rootDir) => {
   const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/");
+  const ignoredFiles = /* @__PURE__ */ new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts"
+  ]);
+  const baseName = path.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
   const pathParts = relPath.toLowerCase().split("/");
   if (pathParts.some((part) => part.includes("asset"))) {
     return true;
@@ -267,7 +300,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
   );
   const spell = yield loadNspell();
   const projectDict = buildProjectDictionary(files, spell);
-  const typos = files.flatMap(
+  const typoPromises = files.map(
     (file) => extractTyposFromCode(
       readFileSyncSafe(file),
       spell,
@@ -275,6 +308,8 @@ var runChecker = (rootDir) => __async(null, null, function* () {
       path.relative(rootDir, file)
     )
   );
+  const typosArrays = yield Promise.all(typoPromises);
+  const typos = typosArrays.flat();
   typos.length ? displayTypos(typos) : displaySuccess(files.length);
 });
 var checker_default = runChecker;

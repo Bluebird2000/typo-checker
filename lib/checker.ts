@@ -7,6 +7,9 @@ import Table from "cli-table3";
 import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
 import { parse } from "@typescript-eslint/typescript-estree";
+import natural from "natural";
+const wordnet = new natural.WordNet();
+const nounInflector = new natural.NounInflector();
 
 let __dirname: string;
 try {
@@ -71,43 +74,33 @@ const splitCompound = (word: string): string[] =>
 const isLikelyCodeOrReserved = (word: string): boolean => {
   if (!word) return false;
 
-  // Lowercase for checks
   const lower = word.toLowerCase();
-
-  // 1. Detect URLs or URL parts (http, https, www, domain extensions, slashes, colons, query params)
-  // We'll treat anything containing :// or starting with www. or having a known TLD as code
   const urlLike = /^(https?:\/\/|www\.)|(\.[a-z]{2,6})(\/|$)/i;
   if (urlLike.test(word)) return true;
 
-  // 2. Detect acronyms or ALL CAPS (at least 2 letters all uppercase)
   if (/^[A-Z]{2,}$/.test(word)) return true;
 
-  // 3. Detect mixed-case identifiers (camelCase, PascalCase)
+  // Detect mixed-case identifiers (camelCase, PascalCase)
   // If word contains uppercase letters inside (not only first letter), treat as code
   if (/[a-z]+[A-Z]+/.test(word) || /[A-Z]+[a-z]+/.test(word)) {
     return true;
   }
 
-  // 4. Detect words that look like function calls (ending with parentheses)
+  // Detect words that look like function calls (ending with parentheses)
   if (/^[a-zA-Z0-9_$]+\(\)$/.test(word)) return true;
 
-  // 5. Detect file extensions or known tech keywords common in code (without hardcoded whitelist)
-  // Heuristic: words ending with typical extensions (js, ts, jsx, tsx, json, html, css, scss, less, png, jpg, svg)
   if (
     /\.(js|ts|jsx|tsx|json|html|css|scss|sass|less|png|jpg|svg|gif|md|yml|yaml|lock)$/.test(
       lower
     )
   )
     return true;
-
-  // 6. Detect typical programming or config words commonly used (heuristic, e.g., api, npm, cli, uuid, etc)
-  // We do this by pattern: if word length <= 5 and all lowercase, treat as reserved (common acronyms)
   if (/^[a-z]{2,5}$/.test(lower)) return true;
 
   // 7. Detect words with digits inside (version numbers, code identifiers)
   if (/\d/.test(word)) return true;
 
-  // 8. Words starting or ending with underscores or dashes likely code tokens
+  // Words starting or ending with underscores or dashes likely code tokens
   if (/^[_\-]+|[_\-]+$/.test(word)) return true;
 
   // Default: treat as normal English word (check spelling)
@@ -169,12 +162,21 @@ const loadNspell = async (): Promise<nspell> => {
   return nspell(aff, dic);
 };
 
-const isValidWord = (
+const isWordInWordNet = (word: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    wordnet.lookup(word, (results) => {
+      resolve(results.length > 0);
+    });
+  });
+};
+
+const isValidWord = async (
   word: string,
   projectDict: ProjectDictionary,
   spell: nspell
-): boolean => {
+): Promise<boolean> => {
   const lower = word.toLowerCase();
+
   if (
     lower.length <= 2 ||
     /^[A-Z]+$/.test(word) || // Acronyms
@@ -183,31 +185,40 @@ const isValidWord = (
   ) {
     return false;
   }
-    // Skip if looks like code/reserved identifier inside string
+
   if (isLikelyCodeOrReserved(word)) return false;
 
-  const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  if (spell.correct(lower)) return false;
 
-  if (spell.correct(lower) || suggestionSet.has(lower)) {
+  // Check singular and plural forms with natural
+  const singular = nounInflector.singularize(lower);
+  const plural = nounInflector.pluralize(lower);
+
+  const [isBaseValid, isSingularValid, isPluralValid] = await Promise.all([
+    isWordInWordNet(lower),
+    singular !== lower ? isWordInWordNet(singular) : Promise.resolve(false),
+    plural !== lower ? isWordInWordNet(plural) : Promise.resolve(false),
+  ]);
+
+  if (isBaseValid || isSingularValid || isPluralValid) {
     return false;
   }
 
-  // Skip UK/US spelling variants
+  // Check if suggestions are all valid spellings (i.e. US/UK)
+  const suggestions = spell.suggest(lower);
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  if (suggestionSet.has(lower)) return false;
+
   if (
     suggestions.length > 0 &&
     areAllSuggestionsVariants(word, suggestions, spell)
   ) {
     return false;
   }
-
   return true;
 };
 
-/**
- * Check if all suggestions + original word are valid spellings
- * (indicating US/UK spelling variants)
- */
+
 const areAllSuggestionsVariants = (
   word: string,
   suggestions: string[],
@@ -224,12 +235,12 @@ const areAllSuggestionsVariants = (
   return true; // All recognized => likely spelling variants
 };
 
-const extractTyposFromCode = (
+const extractTyposFromCode = async (
   code: string,
   spell: nspell,
   projectDict: ProjectDictionary,
   file: string
-): TypoEntry[] => {
+): Promise<TypoEntry[]> => {
   const ast = parseCode(code);
   if (!ast) {
     console.error(chalk.red(`Parsing error in ${file}`));
@@ -237,6 +248,8 @@ const extractTyposFromCode = (
   }
 
   const typos: TypoEntry[] = [];
+  const promises: Promise<void>[] = [];
+
   walkAST(ast, (node) => {
     if (
       node.type === "Literal" &&
@@ -244,32 +257,37 @@ const extractTyposFromCode = (
       shouldCheckLiteral(node)
     ) {
       const raw = node.value;
-      for (const part of splitCompound(raw).filter((w) =>
-        /^[a-zA-Z]+$/.test(w)
-      )) {
-        if (isValidWord(part, projectDict, spell)) {
-          const suggestions = spell
-            .suggest(part.toLowerCase())
-            .filter((s) => s.toLowerCase() !== part.toLowerCase());
+      const parts = splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w));
+      parts.forEach((part) => {
+        const check = async () => {
+          if (await isValidWord(part, projectDict, spell)) {
+            const suggestions = spell
+              .suggest(part.toLowerCase())
+              .filter((s) => s.toLowerCase() !== part.toLowerCase());
 
-          if (
-            suggestions.length > 0 &&
-            !areAllSuggestionsVariants(part, suggestions, spell)
-          ) {
-            typos.push({
-              file,
-              line: node.loc.start.line,
-              word: part,
-              suggestions,
-            });
+            if (
+              suggestions.length > 0 &&
+              !areAllSuggestionsVariants(part, suggestions, spell)
+            ) {
+              typos.push({
+                file,
+                line: node.loc.start.line,
+                word: part,
+                suggestions,
+              });
+            }
           }
-        }
-      }
+        };
+        promises.push(check());
+      });
     }
   });
 
+  await Promise.all(promises);
+
   return typos;
 };
+
 
 const shouldCheckLiteral = (node: any): boolean => {
   const parent = node.parent;
@@ -363,6 +381,18 @@ const displaySuccess = (fileCount: number) => {
 const shouldIgnoreFile = (filePath: string, rootDir: string): boolean => {
   const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/"); // normalize slashes
 
+  // Ignore files by exact name
+  const ignoredFiles = new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts",
+  ]);
+  const baseName = path.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
+
   const pathParts = relPath.toLowerCase().split("/");
   if (pathParts.some((part) => part.includes("asset"))) {
     return true;
@@ -393,7 +423,7 @@ const runChecker = async (rootDir: string): Promise<void> => {
   const spell = await loadNspell();
   const projectDict = buildProjectDictionary(files, spell);
 
-  const typos: TypoEntry[] = files.flatMap((file) =>
+  const typoPromises: Promise<TypoEntry[]>[] = files.map((file) =>
     extractTyposFromCode(
       readFileSyncSafe(file),
       spell,
@@ -401,6 +431,8 @@ const runChecker = async (rootDir: string): Promise<void> => {
       path.relative(rootDir, file)
     )
   );
+  const typosArrays = await Promise.all(typoPromises);
+  const typos: TypoEntry[] = typosArrays.flat();
 
   typos.length ? displayTypos(typos) : displaySuccess(files.length);
 };
