@@ -81,7 +81,7 @@ If no typos are found:
 
 - Built with TypeScript.
 - Uses ES modules.
-- Dependencies: `fast-glob`, `chalk`, `cli-table3, nspell`, `dictionary-en`, `@typescript-eslint/typescript-estree`.
+- Dependencies: `fast-glob`, `chalk`, `cli-table3, nspell`, `dictionary-en`, `@typescript-eslint/typescript-estree` `natural`.
 
 ---
 
