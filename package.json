@@ -2,8 +2,8 @@
   "name": "typo-checker",
   "version": "1.0.7",
   "description": "Check for typos in variable names and string literals in a JavaScript/TypeScript codebase.",
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "source": "bin/index.ts",
@@ -14,10 +14,10 @@
     "dist"
   ],
   "scripts": {
-    "devbuild": "tsup bin/index.ts --format esm,cjs --dts --out-dir dist",
-    "build": "tsup lib/**/*.ts bin/**/*.ts --format esm,cjs --dts --out-dir dist",
+    "devbuild": "tsup bin/index.ts lib/checker.ts --format esm,cjs --dts --out-dir dist --clean --splitting false",
+    "build": "tsup bin/index.ts lib/checker.ts --format esm,cjs --dts --out-dir dist --clean --splitting false",
     "prepublishOnly": "npm run build",
-    "typo-checker": "node dist/index.js"
+    "typo-checker": "node dist/bin/index.js"
   },
   "typoChecker": {
     "whitelist": [

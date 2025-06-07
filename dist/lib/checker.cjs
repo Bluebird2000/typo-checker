@@ -55,6 +55,7 @@ __export(checker_exports, {
 module.exports = __toCommonJS(checker_exports);
 var import_fs = __toESM(require("fs"), 1);
 var import_path = __toESM(require("path"), 1);
+var import_readline = __toESM(require("readline"), 1);
 var import_url = require("url");
 var import_fast_glob = __toESM(require("fast-glob"), 1);
 var import_chalk = __toESM(require("chalk"), 1);
@@ -276,6 +277,29 @@ var buildProjectDictionary = (files, spell) => {
   }
   return dict;
 };
+var saveTyposToMarkdown = (typos, outputPath = "typo-report.md") => {
+  if (typos.length === 0) return;
+  let content = `# \u{1F4DD} Typo Report
+
+Generated on ${(/* @__PURE__ */ new Date()).toLocaleString()}
+
+`;
+  content += "| File | Line | Word | Suggestions |\n";
+  content += "|------|------|------|-------------|\n";
+  for (const { file, line, word, suggestions } of typos) {
+    content += `| ${file} | ${line} | ${word} | ${suggestions.join(", ")} |
+`;
+  }
+  content += `
+> Tip: If some words are valid in your domain, consider adding them to the whitelist.
+`;
+  try {
+    import_fs.default.writeFileSync(import_path.default.join(process.cwd(), outputPath), content, "utf8");
+    console.log(import_chalk.default.green(`\u{1F4C4} Typo report saved to ${outputPath}`));
+  } catch (err) {
+    console.error(import_chalk.default.red("\u274C Failed to write typo report:"), err);
+  }
+};
 var displayTypos = (typos) => {
   const table = new import_cli_table3.default({
     head: ["File", "Line", "Word", "Suggestions"],
@@ -343,6 +367,31 @@ var runChecker = (rootDir) => __async(null, null, function* () {
   );
   const typosArrays = yield Promise.all(typoPromises);
   const typos = typosArrays.flat();
-  typos.length ? displayTypos(typos) : displaySuccess(files.length);
+  const hasTypos = typos.length > 0;
+  hasTypos ? displayTypos(typos) : displaySuccess(files.length);
+  if (hasTypos) {
+    const userResponse = yield promptUser(
+      "Do you want to save the report as Markdown? (y/n): "
+    );
+    if (["y", "yes"].includes(userResponse.toLowerCase())) {
+      saveTyposToMarkdown(typos);
+    } else {
+      console.log(import_chalk.default.yellow("Markdown report not saved."));
+    }
+  } else {
+    console.log(import_chalk.default.green("No typos found."));
+  }
 });
+var promptUser = (question) => {
+  const rl = import_readline.default.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+};
 var checker_default = runChecker;
