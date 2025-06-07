@@ -22,6 +22,7 @@ var __async = (__this, __arguments, generator) => {
 // lib/checker.ts
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import chalk from "chalk";
@@ -243,6 +244,29 @@ var buildProjectDictionary = (files, spell) => {
   }
   return dict;
 };
+var saveTyposToMarkdown = (typos, outputPath = "typo-report.md") => {
+  if (typos.length === 0) return;
+  let content = `# \u{1F4DD} Typo Report
+
+Generated on ${(/* @__PURE__ */ new Date()).toLocaleString()}
+
+`;
+  content += "| File | Line | Word | Suggestions |\n";
+  content += "|------|------|------|-------------|\n";
+  for (const { file, line, word, suggestions } of typos) {
+    content += `| ${file} | ${line} | ${word} | ${suggestions.join(", ")} |
+`;
+  }
+  content += `
+> Tip: If some words are valid in your domain, consider adding them to the whitelist.
+`;
+  try {
+    fs.writeFileSync(path.join(process.cwd(), outputPath), content, "utf8");
+    console.log(chalk.green(`\u{1F4C4} Typo report saved to ${outputPath}`));
+  } catch (err) {
+    console.error(chalk.red("\u274C Failed to write typo report:"), err);
+  }
+};
 var displayTypos = (typos) => {
   const table = new Table({
     head: ["File", "Line", "Word", "Suggestions"],
@@ -310,8 +334,33 @@ var runChecker = (rootDir) => __async(null, null, function* () {
   );
   const typosArrays = yield Promise.all(typoPromises);
   const typos = typosArrays.flat();
-  typos.length ? displayTypos(typos) : displaySuccess(files.length);
+  const hasTypos = typos.length > 0;
+  hasTypos ? displayTypos(typos) : displaySuccess(files.length);
+  if (hasTypos) {
+    const userResponse = yield promptUser(
+      "Do you want to save the report as Markdown? (y/n): "
+    );
+    if (["y", "yes"].includes(userResponse.toLowerCase())) {
+      saveTyposToMarkdown(typos);
+    } else {
+      console.log(chalk.yellow("Markdown report not saved."));
+    }
+  } else {
+    console.log(chalk.green("No typos found."));
+  }
 });
+var promptUser = (question) => {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+};
 var checker_default = runChecker;
 export {
   checker_default as default

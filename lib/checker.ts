@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import chalk from "chalk";
@@ -218,7 +219,6 @@ const isValidWord = async (
   return true;
 };
 
-
 const areAllSuggestionsVariants = (
   word: string,
   suggestions: string[],
@@ -288,7 +288,6 @@ const extractTyposFromCode = async (
   return typos;
 };
 
-
 const shouldCheckLiteral = (node: any): boolean => {
   const parent = node.parent;
   if (!parent) return true;
@@ -351,6 +350,30 @@ const buildProjectDictionary = (
   }
 
   return dict;
+};
+
+const saveTyposToMarkdown = (
+  typos: TypoEntry[],
+  outputPath = "typo-report.md"
+) => {
+  if (typos.length === 0) return;
+
+  let content = `# 📝 Typo Report\n\nGenerated on ${new Date().toLocaleString()}\n\n`;
+  content += "| File | Line | Word | Suggestions |\n";
+  content += "|------|------|------|-------------|\n";
+
+  for (const { file, line, word, suggestions } of typos) {
+    content += `| ${file} | ${line} | ${word} | ${suggestions.join(", ")} |\n`;
+  }
+
+  content += `\n> Tip: If some words are valid in your domain, consider adding them to the whitelist.\n`;
+
+  try {
+    fs.writeFileSync(path.join(process.cwd(), outputPath), content, "utf8");
+    console.log(chalk.green(`📄 Typo report saved to ${outputPath}`));
+  } catch (err) {
+    console.error(chalk.red("❌ Failed to write typo report:"), err);
+  }
 };
 
 const displayTypos = (typos: TypoEntry[]) => {
@@ -434,7 +457,36 @@ const runChecker = async (rootDir: string): Promise<void> => {
   const typosArrays = await Promise.all(typoPromises);
   const typos: TypoEntry[] = typosArrays.flat();
 
-  typos.length ? displayTypos(typos) : displaySuccess(files.length);
+  const hasTypos = typos.length > 0;
+
+  hasTypos ? displayTypos(typos) : displaySuccess(files.length);
+
+  if (hasTypos) {
+    const userResponse = await promptUser(
+      "Do you want to save the report as Markdown? (y/n): "
+    );
+    if (["y", "yes"].includes(userResponse.toLowerCase())) {
+      saveTyposToMarkdown(typos);
+    } else {
+      console.log(chalk.yellow("Markdown report not saved."));
+    }
+  } else {
+    console.log(chalk.green("No typos found."));
+  }
+};
+
+const promptUser = (question: string): Promise<string> => {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 };
 
 export default runChecker;
