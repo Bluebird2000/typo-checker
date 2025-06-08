@@ -1,6 +1,6 @@
 {
   "name": "typo-checker",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Check for typos in variable names and string literals in a JavaScript/TypeScript codebase.",
   "main": "dist/index.js",
   "module": "dist/index.js",
