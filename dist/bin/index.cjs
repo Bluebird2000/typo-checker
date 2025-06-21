@@ -46,6 +46,7 @@ var __async = (__this, __arguments, generator) => {
 // lib/checker.ts
 var import_fs = __toESM(require("fs"), 1);
 var import_path = __toESM(require("path"), 1);
+var import_readline = __toESM(require("readline"), 1);
 var import_url = require("url");
 var import_fast_glob = __toESM(require("fast-glob"), 1);
 var import_chalk = __toESM(require("chalk"), 1);
@@ -233,7 +234,10 @@ var placeNames = /* @__PURE__ */ new Set([
 ]);
 
 // lib/checker.ts
+var import_natural = __toESM(require("natural"), 1);
 var import_meta = {};
+var wordnet = new import_natural.default.WordNet();
+var nounInflector = new import_natural.default.NounInflector();
 var __dirname;
 try {
   const __filename = (0, import_url.fileURLToPath)(import_meta.url);
@@ -330,15 +334,38 @@ var loadConfig = (rootDir) => {
   );
 };
 var splitCompound = (word) => word.split(/[_\s]+/).flatMap((seg) => seg.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
-var walkAST = (node, cb) => {
+var isLikelyCodeOrReserved = (word) => {
+  if (!word) return false;
+  const lower = word.toLowerCase();
+  const urlLike = /^(https?:\/\/|www\.)|(\.[a-z]{2,6})(\/|$)/i;
+  if (urlLike.test(word)) return true;
+  if (/^[A-Z]{2,}$/.test(word)) return true;
+  if (/[a-z]+[A-Z]+/.test(word) || /[A-Z]+[a-z]+/.test(word)) {
+    return true;
+  }
+  if (/^[a-zA-Z0-9_$]+\(\)$/.test(word)) return true;
+  if (/\.(js|ts|jsx|tsx|json|html|css|scss|sass|less|png|jpg|svg|gif|md|yml|yaml|lock)$/.test(
+    lower
+  ))
+    return true;
+  if (/^[a-z]{2,5}$/.test(lower)) return true;
+  if (/\d/.test(word)) return true;
+  if (/^[_\-]+|[_\-]+$/.test(word)) return true;
+  return false;
+};
+var walkAST = (node, cb, parent = null) => {
   if (!node || typeof node !== "object") return;
+  node.parent = parent;
   cb(node);
   for (const key in node) {
+    if (key === "parent") continue;
     const child = node[key];
     if (Array.isArray(child)) {
-      child.forEach((c) => (c == null ? void 0 : c.type) && walkAST(c, cb));
+      child.forEach((c) => {
+        if (c == null ? void 0 : c.type) walkAST(c, cb, node);
+      });
     } else if (child == null ? void 0 : child.type) {
-      walkAST(child, cb);
+      walkAST(child, cb, node);
     }
   }
 };
@@ -368,7 +395,14 @@ var loadNspell = () => __async(null, null, function* () {
   const dic = Buffer.from(dict.dic);
   return (0, import_nspell.default)(aff, dic);
 });
-var isValidWord = (word, projectDict, spell) => {
+var isWordInWordNet = (word) => {
+  return new Promise((resolve) => {
+    wordnet.lookup(word, (results) => {
+      resolve(results.length > 0);
+    });
+  });
+};
+var isValidWord = (word, projectDict, spell) => __async(null, null, function* () {
   const lower = word.toLowerCase();
   if (/^#[0-9a-f]{3,6}$/i.test(word) || // CSS hex colors (#fff, #ffffff)
   /^0x[0-9a-f]+$/i.test(word) || // Hex literals (0xff, 0xffffff)
@@ -380,13 +414,26 @@ var isValidWord = (word, projectDict, spell) => {
   projectDict.has(lower) || dynamicWhitelist.has(lower)) {
     return false;
   }
+  if (isLikelyCodeOrReserved(word)) return false;
+  if (spell.correct(lower)) return false;
+  const singular = nounInflector.singularize(lower);
+  const plural = nounInflector.pluralize(lower);
+  const [isBaseValid, isSingularValid, isPluralValid] = yield Promise.all([
+    isWordInWordNet(lower),
+    singular !== lower ? isWordInWordNet(singular) : Promise.resolve(false),
+    plural !== lower ? isWordInWordNet(plural) : Promise.resolve(false)
+  ]);
+  if (isBaseValid || isSingularValid || isPluralValid) {
+    return false;
+  }
   const suggestions = spell.suggest(lower);
   const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
-  if (spell.correct(lower) || suggestionSet.has(lower)) {
+  if (suggestionSet.has(lower)) return false;
+  if (suggestions.length > 0 && areAllSuggestionsVariants(word, suggestions, spell)) {
     return false;
   }
   return true;
-};
+});
 var areAllSuggestionsVariants = (word, suggestions, spell) => {
   const variants = new Set(suggestions.map((s) => s.toLowerCase()));
   variants.add(word.toLowerCase());
@@ -397,43 +444,60 @@ var areAllSuggestionsVariants = (word, suggestions, spell) => {
   }
   return true;
 };
-var extractTyposFromCode = (code, spell, projectDict, file) => {
+var extractTyposFromCode = (code, spell, projectDict, file) => __async(null, null, function* () {
   const ast = parseCode(code);
   if (!ast) {
     console.error(import_chalk.default.red(`Parsing error in ${file}`));
     return [];
   }
   const typos = [];
+  const promises = [];
   walkAST(ast, (node) => {
-    if (node.type === "Literal" && typeof node.value === "string") {
+    if (node.type === "Literal" && typeof node.value === "string" && shouldCheckLiteral(node)) {
       const raw = node.value;
-      if (typeof raw !== "string") return;
       const lowerRaw = raw.toLowerCase();
       if (dynamicWhitelist.has(lowerRaw)) {
         return;
       }
-      for (const part of splitCompound(raw).filter(
-        (w) => /^[a-zA-Z]+$/.test(w)
-      )) {
-        const lower = part.toLowerCase();
-        if (isValidWord(part, projectDict, spell)) {
-          const suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
-          if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
-            continue;
+      const parts = splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w));
+      parts.forEach((part) => {
+        const check = () => __async(null, null, function* () {
+          if (yield isValidWord(part, projectDict, spell)) {
+            const suggestions = spell.suggest(part.toLowerCase()).filter((s) => s.toLowerCase() !== part.toLowerCase());
+            if (suggestions.length > 0 && !areAllSuggestionsVariants(part, suggestions, spell)) {
+              typos.push({
+                file,
+                line: node.loc.start.line,
+                word: part,
+                suggestions
+              });
+            }
           }
-          if (suggestions.length > 0) {
-            typos.push({
-              file,
-              line: node.loc.start.line,
-              word: part,
-              suggestions
-            });
-          }
-        }
-      }
+        });
+        promises.push(check());
+      });
     }
   });
+  yield Promise.all(promises);
   return typos;
+});
+var shouldCheckLiteral = (node) => {
+  const parent = node.parent;
+  if (!parent) return true;
+  if (parent.type === "Property" && parent.key === node && !parent.computed) {
+    return false;
+  }
+  if ([
+    "ImportDeclaration",
+    "ExportNamedDeclaration",
+    "ExportAllDeclaration"
+  ].includes(parent.type)) {
+    return false;
+  }
+  if (parent.type === "CallExpression" && parent.callee && ["require", "import"].includes(parent.callee.name)) {
+    return false;
+  }
+  return true;
 };
 var readFileSyncSafe = (file) => {
   try {
@@ -454,6 +518,29 @@ var buildProjectDictionary = (files, spell) => {
     }
   }
   return dict;
+};
+var saveTyposToMarkdown = (typos, outputPath = "typo-report.md") => {
+  if (typos.length === 0) return;
+  let content = `# \u{1F4DD} Typo Report
+
+Generated on ${(/* @__PURE__ */ new Date()).toLocaleString()}
+
+`;
+  content += "| File | Line | Word | Suggestions |\n";
+  content += "|------|------|------|-------------|\n";
+  for (const { file, line, word, suggestions } of typos) {
+    content += `| ${file} | ${line} | ${word} | ${suggestions.join(", ")} |
+`;
+  }
+  content += `
+> Tip: If some words are valid in your domain, consider adding them to the whitelist.
+`;
+  try {
+    import_fs.default.writeFileSync(import_path.default.join(process.cwd(), outputPath), content, "utf8");
+    console.log(import_chalk.default.green(`\u{1F4C4} Typo report saved to ${outputPath}`));
+  } catch (err) {
+    console.error(import_chalk.default.red("\u274C Failed to write typo report:"), err);
+  }
 };
 var displayTypos = (typos) => {
   const table = new import_cli_table3.default({
@@ -478,13 +565,32 @@ var displaySuccess = (fileCount) => {
   table.push(["Accuracy: 100%"]);
   console.log(table.toString());
 };
+var shouldIgnoreFile = (filePath, rootDir) => {
+  const relPath = import_path.default.relative(rootDir, filePath).replace(/\\/g, "/");
+  const ignoredFiles = /* @__PURE__ */ new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts"
+  ]);
+  const baseName = import_path.default.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
+  const pathParts = relPath.toLowerCase().split("/");
+  if (pathParts.some((part) => part.includes("asset"))) {
+    return true;
+  }
+  return false;
+};
 var runChecker = (rootDir) => __async(null, null, function* () {
   loadConfig(rootDir);
-  const files = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
+  const allFiles = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
+  const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
   console.log(
     import_chalk.default.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
@@ -493,7 +599,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
   );
   const spell = yield loadNspell();
   const projectDict = buildProjectDictionary(files, spell);
-  const typos = files.flatMap(
+  const typoPromises = files.map(
     (file) => extractTyposFromCode(
       readFileSyncSafe(file),
       spell,
@@ -501,8 +607,35 @@ var runChecker = (rootDir) => __async(null, null, function* () {
       import_path.default.relative(rootDir, file)
     )
   );
-  typos.length ? displayTypos(typos) : displaySuccess(files.length);
+  const typosArrays = yield Promise.all(typoPromises);
+  const typos = typosArrays.flat();
+  const hasTypos = typos.length > 0;
+  hasTypos ? displayTypos(typos) : displaySuccess(files.length);
+  if (hasTypos) {
+    const userResponse = yield promptUser(
+      "Do you want to save the report as Markdown? (y/n): "
+    );
+    if (["y", "yes"].includes(userResponse.toLowerCase())) {
+      saveTyposToMarkdown(typos);
+    } else {
+      console.log(import_chalk.default.yellow("Markdown report not saved."));
+    }
+  } else {
+    console.log(import_chalk.default.green("No typos found."));
+  }
 });
+var promptUser = (question) => {
+  const rl = import_readline.default.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+};
 var checker_default = runChecker;
 
 // bin/index.ts

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import { fileURLToPath } from "url";
 import fg from "fast-glob";
 import chalk from "chalk";
@@ -8,6 +9,10 @@ import nspell from "nspell";
 import dictionaryEn from "dictionary-en";
 import { parse } from "@typescript-eslint/typescript-estree";
 import { placeNames } from "./place-names";
+import natural from "natural";
+
+const wordnet = new natural.WordNet();
+const nounInflector = new natural.NounInflector();
 
 let __dirname: string;
 try {
@@ -132,15 +137,61 @@ const splitCompound = (word: string): string[] =>
     .split(/[_\s]+/)
     .flatMap((seg) => seg.split(/(?=[A-Z])|[^a-zA-Z]/).filter(Boolean));
 
-const walkAST = (node: unknown, cb: (node: any) => void): void => {
+const isLikelyCodeOrReserved = (word: string): boolean => {
+  if (!word) return false;
+
+  const lower = word.toLowerCase();
+  const urlLike = /^(https?:\/\/|www\.)|(\.[a-z]{2,6})(\/|$)/i;
+  if (urlLike.test(word)) return true;
+
+  if (/^[A-Z]{2,}$/.test(word)) return true;
+
+  // Detect mixed-case identifiers (camelCase, PascalCase)
+  // If word contains uppercase letters inside (not only first letter), treat as code
+  if (/[a-z]+[A-Z]+/.test(word) || /[A-Z]+[a-z]+/.test(word)) {
+    return true;
+  }
+
+  // Detect words that look like function calls (ending with parentheses)
+  if (/^[a-zA-Z0-9_$]+\(\)$/.test(word)) return true;
+
+  if (
+    /\.(js|ts|jsx|tsx|json|html|css|scss|sass|less|png|jpg|svg|gif|md|yml|yaml|lock)$/.test(
+      lower
+    )
+  )
+    return true;
+  if (/^[a-z]{2,5}$/.test(lower)) return true;
+
+  // 7. Detect words with digits inside (version numbers, code identifiers)
+  if (/\d/.test(word)) return true;
+
+  // Words starting or ending with underscores or dashes likely code tokens
+  if (/^[_\-]+|[_\-]+$/.test(word)) return true;
+
+  // Default: treat as normal English word (check spelling)
+  return false;
+};
+
+const walkAST = (
+  node: any,
+  cb: (node: any) => void,
+  parent: any = null
+): void => {
   if (!node || typeof node !== "object") return;
+  node.parent = parent; // set parent manually
+
   cb(node);
+
   for (const key in node) {
-    const child = (node as any)[key];
+    if (key === "parent") continue;
+    const child = node[key];
     if (Array.isArray(child)) {
-      child.forEach((c) => c?.type && walkAST(c, cb));
+      child.forEach((c) => {
+        if (c?.type) walkAST(c, cb, node);
+      });
     } else if (child?.type) {
-      walkAST(child, cb);
+      walkAST(child, cb, node);
     }
   }
 };
@@ -177,11 +228,19 @@ const loadNspell = async (): Promise<nspell> => {
   return nspell(aff, dic);
 };
 
-const isValidWord = (
+const isWordInWordNet = (word: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    wordnet.lookup(word, (results: any[]) => {
+      resolve(results.length > 0);
+    });
+  });
+};
+
+const isValidWord = async (
   word: string,
   projectDict: ProjectDictionary,
   spell: nspell
-): boolean => {
+): Promise<boolean> => {
   const lower = word.toLowerCase();
 
   // Ignore hex color codes and hex values (more comprehensive)
@@ -203,13 +262,35 @@ const isValidWord = (
     return false;
   }
 
-  // If the word is already correct or suggestion contains itself, ignore
-  const suggestions = spell.suggest(lower);
-  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
-  if (spell.correct(lower) || suggestionSet.has(lower)) {
+  if (isLikelyCodeOrReserved(word)) return false;
+
+  if (spell.correct(lower)) return false;
+
+  // Check singular and plural forms with natural
+  const singular = nounInflector.singularize(lower);
+  const plural = nounInflector.pluralize(lower);
+
+  const [isBaseValid, isSingularValid, isPluralValid] = await Promise.all([
+    isWordInWordNet(lower),
+    singular !== lower ? isWordInWordNet(singular) : Promise.resolve(false),
+    plural !== lower ? isWordInWordNet(plural) : Promise.resolve(false),
+  ]);
+
+  if (isBaseValid || isSingularValid || isPluralValid) {
     return false;
   }
 
+  // Check if suggestions are all valid spellings (i.e. US/UK)
+  const suggestions = spell.suggest(lower);
+  const suggestionSet = new Set(suggestions.map((s) => s.toLowerCase()));
+  if (suggestionSet.has(lower)) return false;
+
+  if (
+    suggestions.length > 0 &&
+    areAllSuggestionsVariants(word, suggestions, spell)
+  ) {
+    return false;
+  }
   return true;
 };
 
@@ -233,12 +314,12 @@ const areAllSuggestionsVariants = (
   return true; // All recognized => likely spelling variants
 };
 
-const extractTyposFromCode = (
+const extractTyposFromCode = async (
   code: string,
   spell: nspell,
   projectDict: ProjectDictionary,
   file: string
-): TypoEntry[] => {
+): Promise<TypoEntry[]> => {
   const ast = parseCode(code);
   if (!ast) {
     console.error(chalk.red(`Parsing error in ${file}`));
@@ -246,10 +327,15 @@ const extractTyposFromCode = (
   }
 
   const typos: TypoEntry[] = [];
+  const promises: Promise<void>[] = [];
+
   walkAST(ast, (node) => {
-    if (node.type === "Literal" && typeof node.value === "string") {
+    if (
+      node.type === "Literal" &&
+      typeof node.value === "string" &&
+      shouldCheckLiteral(node)
+    ) {
       const raw = node.value;
-      if (typeof raw !== "string") return;
 
       // Check if the entire string is a known place name
       const lowerRaw = raw.toLowerCase();
@@ -257,40 +343,68 @@ const extractTyposFromCode = (
         return; // Skip entire string if it's a known place name
       }
 
-      for (const part of splitCompound(raw).filter((w) =>
-        /^[a-zA-Z]+$/.test(w)
-      )) {
-        const lower = part.toLowerCase();
+      const parts = splitCompound(raw).filter((w) => /^[a-zA-Z]+$/.test(w));
+      parts.forEach((part) => {
+        const check = async () => {
+          if (await isValidWord(part, projectDict, spell)) {
+            const suggestions = spell
+              .suggest(part.toLowerCase())
+              .filter((s) => s.toLowerCase() !== part.toLowerCase());
 
-        if (isValidWord(part, projectDict, spell)) {
-          // Get suggestions excluding the word itself
-          const suggestions = spell
-            .suggest(lower)
-            .filter((s: string) => s.toLowerCase() !== lower);
-
-          // Skip if all suggestions + word are valid spellings (US/UK variants)
-          if (
-            suggestions.length > 0 &&
-            areAllSuggestionsVariants(part, suggestions, spell)
-          ) {
-            // This is just a US/UK variant difference - skip listing
-            continue;
+            if (
+              suggestions.length > 0 &&
+              !areAllSuggestionsVariants(part, suggestions, spell)
+            ) {
+              typos.push({
+                file,
+                line: node.loc.start.line,
+                word: part,
+                suggestions,
+              });
+            }
           }
-
-          if (suggestions.length > 0) {
-            typos.push({
-              file,
-              line: node.loc.start.line,
-              word: part,
-              suggestions,
-            });
-          }
-        }
-      }
+        };
+        promises.push(check());
+      });
     }
   });
 
+  await Promise.all(promises);
+
   return typos;
+};
+
+const shouldCheckLiteral = (node: any): boolean => {
+  const parent = node.parent;
+  if (!parent) return true;
+
+  if (
+    parent.type === "Property" &&
+    parent.key === node &&
+    !parent.computed // it's just a key, skip
+  ) {
+    return false;
+  }
+
+  if (
+    [
+      "ImportDeclaration",
+      "ExportNamedDeclaration",
+      "ExportAllDeclaration",
+    ].includes(parent.type)
+  ) {
+    return false;
+  }
+
+  if (
+    parent.type === "CallExpression" &&
+    parent.callee &&
+    ["require", "import"].includes(parent.callee.name)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const readFileSyncSafe = (file: string): string => {
@@ -324,6 +438,30 @@ const buildProjectDictionary = (
   return dict;
 };
 
+const saveTyposToMarkdown = (
+  typos: TypoEntry[],
+  outputPath = "typo-report.md"
+) => {
+  if (typos.length === 0) return;
+
+  let content = `# 📝 Typo Report\n\nGenerated on ${new Date().toLocaleString()}\n\n`;
+  content += "| File | Line | Word | Suggestions |\n";
+  content += "|------|------|------|-------------|\n";
+
+  for (const { file, line, word, suggestions } of typos) {
+    content += `| ${file} | ${line} | ${word} | ${suggestions.join(", ")} |\n`;
+  }
+
+  content += `\n> Tip: If some words are valid in your domain, consider adding them to the whitelist.\n`;
+
+  try {
+    fs.writeFileSync(path.join(process.cwd(), outputPath), content, "utf8");
+    console.log(chalk.green(`📄 Typo report saved to ${outputPath}`));
+  } catch (err) {
+    console.error(chalk.red("❌ Failed to write typo report:"), err);
+  }
+};
+
 const displayTypos = (typos: TypoEntry[]) => {
   const table = new Table({
     head: ["File", "Line", "Word", "Suggestions"],
@@ -349,14 +487,41 @@ const displaySuccess = (fileCount: number) => {
   console.log(table.toString());
 };
 
+const shouldIgnoreFile = (filePath: string, rootDir: string): boolean => {
+  const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/"); // normalize slashes
+
+  // Ignore files by exact name
+  const ignoredFiles = new Set([
+    "babel.config.js",
+    "babel.config.ts",
+    "metro.config.js",
+    "metro.config.ts",
+  ]);
+  const baseName = path.basename(relPath).toLowerCase();
+  if (ignoredFiles.has(baseName)) {
+    return true;
+  }
+
+  const pathParts = relPath.toLowerCase().split("/");
+  if (pathParts.some((part) => part.includes("asset"))) {
+    return true;
+  }
+
+  return false;
+};
+
 const runChecker = async (rootDir: string): Promise<void> => {
   loadConfig(rootDir);
 
-  const files = await fg(["**/*.{js,ts,jsx,tsx}"], {
+  // Basic ignore for node_modules + specific files/folders
+  const allFiles = await fg(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"],
   });
+
+  // Filter files to ignore the specific configs, styles and assets folders
+  const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
 
   console.log(
     chalk.blueBright.bold(
@@ -367,7 +532,7 @@ const runChecker = async (rootDir: string): Promise<void> => {
   const spell = await loadNspell();
   const projectDict = buildProjectDictionary(files, spell);
 
-  const typos: TypoEntry[] = files.flatMap((file) =>
+  const typoPromises: Promise<TypoEntry[]>[] = files.map((file) =>
     extractTyposFromCode(
       readFileSyncSafe(file),
       spell,
@@ -375,8 +540,39 @@ const runChecker = async (rootDir: string): Promise<void> => {
       path.relative(rootDir, file)
     )
   );
+  const typosArrays = await Promise.all(typoPromises);
+  const typos: TypoEntry[] = typosArrays.flat();
 
-  typos.length ? displayTypos(typos) : displaySuccess(files.length);
+  const hasTypos = typos.length > 0;
+
+  hasTypos ? displayTypos(typos) : displaySuccess(files.length);
+
+  if (hasTypos) {
+    const userResponse = await promptUser(
+      "Do you want to save the report as Markdown? (y/n): "
+    );
+    if (["y", "yes"].includes(userResponse.toLowerCase())) {
+      saveTyposToMarkdown(typos);
+    } else {
+      console.log(chalk.yellow("Markdown report not saved."));
+    }
+  } else {
+    console.log(chalk.green("No typos found."));
+  }
+};
+
+const promptUser = (question: string): Promise<string> => {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 };
 
 export default runChecker;

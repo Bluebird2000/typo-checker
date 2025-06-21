@@ -1,258 +1,29 @@
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-var __async = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try {
-        step(generator.next(value));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    var rejected = (value) => {
-      try {
-        step(generator.throw(value));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
-  });
-};
+import {
+  __async,
+  placeNames
+} from "./chunk-RMPITUWE.js";
 
 // lib/checker.ts
-var checker_exports = {};
-__export(checker_exports, {
-  default: () => checker_default
-});
-module.exports = __toCommonJS(checker_exports);
-var import_fs = __toESM(require("fs"), 1);
-var import_path = __toESM(require("path"), 1);
-var import_readline = __toESM(require("readline"), 1);
-var import_url = require("url");
-var import_fast_glob = __toESM(require("fast-glob"), 1);
-var import_chalk = __toESM(require("chalk"), 1);
-var import_cli_table3 = __toESM(require("cli-table3"), 1);
-var import_nspell = __toESM(require("nspell"), 1);
-var import_dictionary_en = __toESM(require("dictionary-en"), 1);
-var import_typescript_estree = require("@typescript-eslint/typescript-estree");
-
-// lib/place-names.ts
-var placeNames = /* @__PURE__ */ new Set([
-  // Nigerian States
-  "Lagos",
-  "Abuja",
-  "Kano",
-  "Port Harcourt",
-  "Ibadan",
-  "Benin City",
-  "Calabar",
-  "Kaduna",
-  "Enugu",
-  "Abeokuta",
-  "Oyo",
-  "Ogun",
-  "Osun",
-  "Ondo",
-  "Ekiti",
-  "Kwara",
-  "Kogi",
-  "Niger",
-  "Plateau",
-  "Nasarawa",
-  "Taraba",
-  "Adamawa",
-  "Borno",
-  "Yobe",
-  "Bauchi",
-  "Gombe",
-  "Jigawa",
-  "Katsina",
-  "Sokoto",
-  "Zamfara",
-  "Kebbi",
-  "Rivers",
-  "Bayelsa",
-  "Delta",
-  "Edo",
-  "Cross River",
-  "Akwa Ibom",
-  "Abia",
-  "Imo",
-  "Anambra",
-  "Ebonyi",
-  // Major Cities Worldwide
-  "New York",
-  "London",
-  "Tokyo",
-  "Paris",
-  "Sydney",
-  "Toronto",
-  "Berlin",
-  "Moscow",
-  "Dubai",
-  "Singapore",
-  "Hong Kong",
-  "Seoul",
-  "Mumbai",
-  "Delhi",
-  "Shanghai",
-  "Beijing",
-  "Cairo",
-  "Istanbul",
-  "Rome",
-  "Madrid",
-  "Amsterdam",
-  "Vienna",
-  "Stockholm",
-  "Oslo",
-  "Helsinki",
-  "Copenhagen",
-  "Warsaw",
-  "Prague",
-  "Budapest",
-  "Athens",
-  "Lisbon",
-  "Dublin",
-  "Edinburgh",
-  "Glasgow",
-  "Manchester",
-  "Birmingham",
-  "Liverpool",
-  "Bristol",
-  "Cardiff",
-  "Belfast",
-  // US States
-  "Alabama",
-  "Alaska",
-  "Arizona",
-  "Arkansas",
-  "California",
-  "Colorado",
-  "Connecticut",
-  "Delaware",
-  "Florida",
-  "Georgia",
-  "Hawaii",
-  "Idaho",
-  "Illinois",
-  "Indiana",
-  "Iowa",
-  "Kansas",
-  "Kentucky",
-  "Louisiana",
-  "Maine",
-  "Maryland",
-  "Massachusetts",
-  "Michigan",
-  "Minnesota",
-  "Mississippi",
-  "Missouri",
-  "Montana",
-  "Nebraska",
-  "Nevada",
-  "New Hampshire",
-  "New Jersey",
-  "New Mexico",
-  "New York",
-  "North Carolina",
-  "North Dakota",
-  "Ohio",
-  "Oklahoma",
-  "Oregon",
-  "Pennsylvania",
-  "Rhode Island",
-  "South Carolina",
-  "South Dakota",
-  "Tennessee",
-  "Texas",
-  "Utah",
-  "Vermont",
-  "Virginia",
-  "Washington",
-  "West Virginia",
-  "Wisconsin",
-  "Wyoming",
-  // Common Country Names
-  "Nigeria",
-  "Ghana",
-  "Kenya",
-  "South Africa",
-  "Egypt",
-  "Morocco",
-  "United States",
-  "Canada",
-  "Mexico",
-  "Brazil",
-  "Argentina",
-  "Chile",
-  "United Kingdom",
-  "France",
-  "Germany",
-  "Italy",
-  "Spain",
-  "Portugal",
-  "Netherlands",
-  "Belgium",
-  "Switzerland",
-  "Austria",
-  "Sweden",
-  "Norway",
-  "Denmark",
-  "Finland",
-  "Poland",
-  "Russia",
-  "China",
-  "Japan",
-  "India",
-  "Australia",
-  "New Zealand",
-  "Indonesia",
-  "Malaysia",
-  "Thailand",
-  "Vietnam",
-  "Philippines",
-  "Singapore"
-]);
-
-// lib/checker.ts
-var import_natural = __toESM(require("natural"), 1);
+import fs from "fs";
+import path from "path";
+import readline from "readline";
+import { fileURLToPath } from "url";
+import fg from "fast-glob";
+import chalk from "chalk";
+import Table from "cli-table3";
+import nspell from "nspell";
+import dictionaryEn from "dictionary-en";
+import { parse } from "@typescript-eslint/typescript-estree";
+import natural from "natural";
 var import_meta = {};
-var wordnet = new import_natural.default.WordNet();
-var nounInflector = new import_natural.default.NounInflector();
+var wordnet = new natural.WordNet();
+var nounInflector = new natural.NounInflector();
 var __dirname;
 try {
-  const __filename = (0, import_url.fileURLToPath)(import_meta.url);
-  __dirname = import_path.default.dirname(__filename);
+  const __filename = fileURLToPath(import_meta.url);
+  __dirname = path.dirname(__filename);
 } catch (e) {
-  __dirname = import_path.default.resolve();
+  __dirname = path.resolve();
 }
 var predefinedWhitelist = /* @__PURE__ */ new Set([
   "eslint",
@@ -316,23 +87,23 @@ var predefinedWhitelist = /* @__PURE__ */ new Set([
 ]);
 var dynamicWhitelist = /* @__PURE__ */ new Set();
 var loadConfig = (rootDir) => {
-  const configPath = import_path.default.join(rootDir, "typo-checker.config.json");
-  const packageJsonPath = import_path.default.join(rootDir, "package.json");
+  const configPath = path.join(rootDir, "typo-checker.config.json");
+  const packageJsonPath = path.join(rootDir, "package.json");
   let config = {};
-  if (import_fs.default.existsSync(configPath)) {
+  if (fs.existsSync(configPath)) {
     try {
-      config = JSON.parse(import_fs.default.readFileSync(configPath, "utf8"));
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
     } catch (err) {
-      console.error(import_chalk.default.red("Error parsing typo-checker.config.json"), err);
+      console.error(chalk.red("Error parsing typo-checker.config.json"), err);
     }
-  } else if (import_fs.default.existsSync(packageJsonPath)) {
+  } else if (fs.existsSync(packageJsonPath)) {
     try {
-      const pkg = JSON.parse(import_fs.default.readFileSync(packageJsonPath, "utf8"));
+      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
       if (pkg.typoChecker) {
         config = pkg.typoChecker;
       }
     } catch (err) {
-      console.error(import_chalk.default.red("Error parsing package.json"), err);
+      console.error(chalk.red("Error parsing package.json"), err);
     }
   }
   dynamicWhitelist = new Set(
@@ -380,7 +151,7 @@ var walkAST = (node, cb, parent = null) => {
 };
 var parseCode = (code) => {
   try {
-    return (0, import_typescript_estree.parse)(code, { loc: true, jsx: true, useJSXTextNode: true });
+    return parse(code, { loc: true, jsx: true, useJSXTextNode: true });
   } catch (e) {
     return null;
   }
@@ -399,10 +170,10 @@ var extractWordsFromCode = (code) => {
   return words;
 };
 var loadNspell = () => __async(null, null, function* () {
-  const dict = yield import_dictionary_en.default;
+  const dict = yield dictionaryEn;
   const aff = Buffer.from(dict.aff);
   const dic = Buffer.from(dict.dic);
-  return (0, import_nspell.default)(aff, dic);
+  return nspell(aff, dic);
 });
 var isWordInWordNet = (word) => {
   return new Promise((resolve) => {
@@ -456,7 +227,7 @@ var areAllSuggestionsVariants = (word, suggestions, spell) => {
 var extractTyposFromCode = (code, spell, projectDict, file) => __async(null, null, function* () {
   const ast = parseCode(code);
   if (!ast) {
-    console.error(import_chalk.default.red(`Parsing error in ${file}`));
+    console.error(chalk.red(`Parsing error in ${file}`));
     return [];
   }
   const typos = [];
@@ -510,7 +281,7 @@ var shouldCheckLiteral = (node) => {
 };
 var readFileSyncSafe = (file) => {
   try {
-    return import_fs.default.readFileSync(file, "utf8");
+    return fs.readFileSync(file, "utf8");
   } catch (e) {
     return "";
   }
@@ -545,29 +316,29 @@ Generated on ${(/* @__PURE__ */ new Date()).toLocaleString()}
 > Tip: If some words are valid in your domain, consider adding them to the whitelist.
 `;
   try {
-    import_fs.default.writeFileSync(import_path.default.join(process.cwd(), outputPath), content, "utf8");
-    console.log(import_chalk.default.green(`\u{1F4C4} Typo report saved to ${outputPath}`));
+    fs.writeFileSync(path.join(process.cwd(), outputPath), content, "utf8");
+    console.log(chalk.green(`\u{1F4C4} Typo report saved to ${outputPath}`));
   } catch (err) {
-    console.error(import_chalk.default.red("\u274C Failed to write typo report:"), err);
+    console.error(chalk.red("\u274C Failed to write typo report:"), err);
   }
 };
 var displayTypos = (typos) => {
-  const table = new import_cli_table3.default({
+  const table = new Table({
     head: ["File", "Line", "Word", "Suggestions"],
     colWidths: [40, 10, 20, 40]
   });
   typos.forEach(
     ({ file, line, word, suggestions }) => table.push([file, line, word, suggestions.join(", ")])
   );
-  console.log(import_chalk.default.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
+  console.log(chalk.yellowBright.bold("\u26A0\uFE0F Typos found:\n"));
   console.log(table.toString());
-  console.log(import_chalk.default.redBright.bold(`
+  console.log(chalk.redBright.bold(`
 \u274C Total typos: ${typos.length}
 `));
 };
 var displaySuccess = (fileCount) => {
-  const table = new import_cli_table3.default({
-    head: [import_chalk.default.greenBright.bold("\u2705 Typo Check Passed")]
+  const table = new Table({
+    head: [chalk.greenBright.bold("\u2705 Typo Check Passed")]
   });
   table.push(["Checked Files: " + fileCount]);
   table.push(["Total Typos: 0"]);
@@ -575,14 +346,14 @@ var displaySuccess = (fileCount) => {
   console.log(table.toString());
 };
 var shouldIgnoreFile = (filePath, rootDir) => {
-  const relPath = import_path.default.relative(rootDir, filePath).replace(/\\/g, "/");
+  const relPath = path.relative(rootDir, filePath).replace(/\\/g, "/");
   const ignoredFiles = /* @__PURE__ */ new Set([
     "babel.config.js",
     "babel.config.ts",
     "metro.config.js",
     "metro.config.ts"
   ]);
-  const baseName = import_path.default.basename(relPath).toLowerCase();
+  const baseName = path.basename(relPath).toLowerCase();
   if (ignoredFiles.has(baseName)) {
     return true;
   }
@@ -594,14 +365,14 @@ var shouldIgnoreFile = (filePath, rootDir) => {
 };
 var runChecker = (rootDir) => __async(null, null, function* () {
   loadConfig(rootDir);
-  const allFiles = yield (0, import_fast_glob.default)(["**/*.{js,ts,jsx,tsx}"], {
+  const allFiles = yield fg(["**/*.{js,ts,jsx,tsx}"], {
     cwd: rootDir,
     absolute: true,
     ignore: ["node_modules"]
   });
   const files = allFiles.filter((file) => !shouldIgnoreFile(file, rootDir));
   console.log(
-    import_chalk.default.blueBright.bold(
+    chalk.blueBright.bold(
       `\u{1F50D} Building internal dictionary from ${files.length} files...
 `
     )
@@ -613,7 +384,7 @@ var runChecker = (rootDir) => __async(null, null, function* () {
       readFileSyncSafe(file),
       spell,
       projectDict,
-      import_path.default.relative(rootDir, file)
+      path.relative(rootDir, file)
     )
   );
   const typosArrays = yield Promise.all(typoPromises);
@@ -627,14 +398,14 @@ var runChecker = (rootDir) => __async(null, null, function* () {
     if (["y", "yes"].includes(userResponse.toLowerCase())) {
       saveTyposToMarkdown(typos);
     } else {
-      console.log(import_chalk.default.yellow("Markdown report not saved."));
+      console.log(chalk.yellow("Markdown report not saved."));
     }
   } else {
-    console.log(import_chalk.default.green("No typos found."));
+    console.log(chalk.green("No typos found."));
   }
 });
 var promptUser = (question) => {
-  const rl = import_readline.default.createInterface({
+  const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
   });
@@ -646,3 +417,7 @@ var promptUser = (question) => {
   });
 };
 var checker_default = runChecker;
+
+export {
+  checker_default
+};
