@@ -17,7 +17,7 @@
     "devbuild": "tsup bin/index.ts --format esm,cjs --dts --out-dir dist",
     "build": "tsup lib/**/*.ts bin/**/*.ts --format esm,cjs --dts --out-dir dist",
     "prepublishOnly": "npm run build",
-    "typo-checker": "node dist/index.js"
+    "typo-checker": "node dist/bin/index.js"
   },
   "typoChecker": {
     "whitelist": [

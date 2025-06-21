@@ -62,6 +62,186 @@ var import_cli_table3 = __toESM(require("cli-table3"), 1);
 var import_nspell = __toESM(require("nspell"), 1);
 var import_dictionary_en = __toESM(require("dictionary-en"), 1);
 var import_typescript_estree = require("@typescript-eslint/typescript-estree");
+
+// lib/place-names.ts
+var placeNames = /* @__PURE__ */ new Set([
+  // Nigerian States
+  "Lagos",
+  "Abuja",
+  "Kano",
+  "Port Harcourt",
+  "Ibadan",
+  "Benin City",
+  "Calabar",
+  "Kaduna",
+  "Enugu",
+  "Abeokuta",
+  "Oyo",
+  "Ogun",
+  "Osun",
+  "Ondo",
+  "Ekiti",
+  "Kwara",
+  "Kogi",
+  "Niger",
+  "Plateau",
+  "Nasarawa",
+  "Taraba",
+  "Adamawa",
+  "Borno",
+  "Yobe",
+  "Bauchi",
+  "Gombe",
+  "Jigawa",
+  "Katsina",
+  "Sokoto",
+  "Zamfara",
+  "Kebbi",
+  "Rivers",
+  "Bayelsa",
+  "Delta",
+  "Edo",
+  "Cross River",
+  "Akwa Ibom",
+  "Abia",
+  "Imo",
+  "Anambra",
+  "Ebonyi",
+  // Major Cities Worldwide
+  "New York",
+  "London",
+  "Tokyo",
+  "Paris",
+  "Sydney",
+  "Toronto",
+  "Berlin",
+  "Moscow",
+  "Dubai",
+  "Singapore",
+  "Hong Kong",
+  "Seoul",
+  "Mumbai",
+  "Delhi",
+  "Shanghai",
+  "Beijing",
+  "Cairo",
+  "Istanbul",
+  "Rome",
+  "Madrid",
+  "Amsterdam",
+  "Vienna",
+  "Stockholm",
+  "Oslo",
+  "Helsinki",
+  "Copenhagen",
+  "Warsaw",
+  "Prague",
+  "Budapest",
+  "Athens",
+  "Lisbon",
+  "Dublin",
+  "Edinburgh",
+  "Glasgow",
+  "Manchester",
+  "Birmingham",
+  "Liverpool",
+  "Bristol",
+  "Cardiff",
+  "Belfast",
+  // US States
+  "Alabama",
+  "Alaska",
+  "Arizona",
+  "Arkansas",
+  "California",
+  "Colorado",
+  "Connecticut",
+  "Delaware",
+  "Florida",
+  "Georgia",
+  "Hawaii",
+  "Idaho",
+  "Illinois",
+  "Indiana",
+  "Iowa",
+  "Kansas",
+  "Kentucky",
+  "Louisiana",
+  "Maine",
+  "Maryland",
+  "Massachusetts",
+  "Michigan",
+  "Minnesota",
+  "Mississippi",
+  "Missouri",
+  "Montana",
+  "Nebraska",
+  "Nevada",
+  "New Hampshire",
+  "New Jersey",
+  "New Mexico",
+  "New York",
+  "North Carolina",
+  "North Dakota",
+  "Ohio",
+  "Oklahoma",
+  "Oregon",
+  "Pennsylvania",
+  "Rhode Island",
+  "South Carolina",
+  "South Dakota",
+  "Tennessee",
+  "Texas",
+  "Utah",
+  "Vermont",
+  "Virginia",
+  "Washington",
+  "West Virginia",
+  "Wisconsin",
+  "Wyoming",
+  // Common Country Names
+  "Nigeria",
+  "Ghana",
+  "Kenya",
+  "South Africa",
+  "Egypt",
+  "Morocco",
+  "United States",
+  "Canada",
+  "Mexico",
+  "Brazil",
+  "Argentina",
+  "Chile",
+  "United Kingdom",
+  "France",
+  "Germany",
+  "Italy",
+  "Spain",
+  "Portugal",
+  "Netherlands",
+  "Belgium",
+  "Switzerland",
+  "Austria",
+  "Sweden",
+  "Norway",
+  "Denmark",
+  "Finland",
+  "Poland",
+  "Russia",
+  "China",
+  "Japan",
+  "India",
+  "Australia",
+  "New Zealand",
+  "Indonesia",
+  "Malaysia",
+  "Thailand",
+  "Vietnam",
+  "Philippines",
+  "Singapore"
+]);
+
+// lib/checker.ts
 var import_meta = {};
 var __dirname;
 try {
@@ -99,7 +279,36 @@ var predefinedWhitelist = /* @__PURE__ */ new Set([
   "estree",
   "http",
   "www",
-  "utf"
+  "utf",
+  // Add individual words from place names to handle compound names better
+  "cross",
+  "river",
+  "akwa",
+  "ibom",
+  "new",
+  "york",
+  "south",
+  "africa",
+  "united",
+  "states",
+  "kingdom",
+  "hong",
+  "kong",
+  "new",
+  "zealand",
+  "south",
+  "dakota",
+  "north",
+  "carolina",
+  "new",
+  "hampshire",
+  "new",
+  "jersey",
+  "new",
+  "mexico",
+  "west",
+  "virginia",
+  ...Array.from(placeNames).map((name) => name.toLowerCase())
 ]);
 var dynamicWhitelist = /* @__PURE__ */ new Set();
 var loadConfig = (rootDir) => {
@@ -170,6 +379,12 @@ var loadNspell = () => __async(null, null, function* () {
 });
 var isValidWord = (word, projectDict, spell) => {
   const lower = word.toLowerCase();
+  if (/^#[0-9a-f]{3,6}$/i.test(word) || // CSS hex colors (#fff, #ffffff)
+  /^0x[0-9a-f]+$/i.test(word) || // Hex literals (0xff, 0xffffff)
+  /^[0-9a-f]{6,8}$/i.test(word) || // Hex without prefix (ffffff, ffffffff)
+  /^[0-9a-f]{3}$/i.test(word)) {
+    return false;
+  }
   if (lower.length <= 2 || /^[A-Z]+$/.test(word) || // Acronyms
   projectDict.has(lower) || dynamicWhitelist.has(lower)) {
     return false;
@@ -202,14 +417,16 @@ var extractTyposFromCode = (code, spell, projectDict, file) => {
     if (node.type === "Literal" && typeof node.value === "string") {
       const raw = node.value;
       if (typeof raw !== "string") return;
+      const lowerRaw = raw.toLowerCase();
+      if (dynamicWhitelist.has(lowerRaw)) {
+        return;
+      }
       for (const part of splitCompound(raw).filter(
         (w) => /^[a-zA-Z]+$/.test(w)
       )) {
         const lower = part.toLowerCase();
         if (isValidWord(part, projectDict, spell)) {
-          const suggestions = spell.suggest(lower).filter(
-            (s) => s.toLowerCase() !== lower
-          );
+          const suggestions = spell.suggest(lower).filter((s) => s.toLowerCase() !== lower);
           if (suggestions.length > 0 && areAllSuggestionsVariants(part, suggestions, spell)) {
             continue;
           }
